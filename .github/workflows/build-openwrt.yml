@@ -237,19 +237,31 @@ jobs:
     - name: 基础配置生成（保留并强化目标平台）
       run: |
         cd $OPENWRT_PATH
-        # 保留原有.config配置（不再清空）
+        # 保留原有.config配置，但确保目标平台正确设置
         if [ -f "$CONFIG_FILE" ]; then
-          echo "✅ 检测到已有配置文件，直接使用"
+          echo "✅ 检测到已有配置文件，保留并更新目标平台配置"
+          # 备份原配置
+          cp $CONFIG_FILE ${CONFIG_FILE}.bak
+          
+          # 确保目标平台正确设置
+          sed -i '/CONFIG_TARGET_IPQ807X/d' $CONFIG_FILE
+          sed -i '/CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500/d' $CONFIG_FILE
+          echo "CONFIG_TARGET_IPQ807X=y" >> $CONFIG_FILE
+          echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> $CONFIG_FILE
+          echo "CONFIG_TARGET_DEVICE_PACKAGES_jd-be6500=\"kmod-ath11k-ct kmod-qca-ppe\"" >> $CONFIG_FILE
+          echo "CONFIG_TARGET_KERNEL_PARTSIZE=16" >> $CONFIG_FILE
+          echo "CONFIG_TARGET_ROOTFS_PARTSIZE=128" >> $CONFIG_FILE
         else
           # 生成默认配置
           make defconfig
+          
+          # 设置目标平台
+          echo "CONFIG_TARGET_IPQ807X=y" >> $CONFIG_FILE
+          echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> $CONFIG_FILE
+          echo "CONFIG_TARGET_DEVICE_PACKAGES_jd-be6500=\"kmod-ath11k-ct kmod-qca-ppe\"" >> $CONFIG_FILE
+          echo "CONFIG_TARGET_KERNEL_PARTSIZE=16" >> $CONFIG_FILE
+          echo "CONFIG_TARGET_ROOTFS_PARTSIZE=128" >> $CONFIG_FILE
         fi
-        
-        # 强制设置IPQ807x目标平台（IPQ5332适配，追加配置）
-        echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> .config  # 关键配置
-        echo "CONFIG_TARGET_DEVICE_PACKAGES_jd-be6500=\"kmod-ath11k-ct kmod-qca-ppe\"" >> .config
-        echo "CONFIG_TARGET_KERNEL_PARTSIZE=16" >> .config
-        echo "CONFIG_TARGET_ROOTFS_PARTSIZE=128" >> .config
         
         # 显示当前配置（用于调试）
         echo "=== 当前.config 设备配置 ==="
@@ -305,6 +317,7 @@ jobs:
         if [ ! -f "$DEVICE_TREE" ]; then
           echo "❌ 设备树不存在，重新生成..."
           # 重新生成设备树（使用echo）
+          mkdir -p "$(dirname "$DEVICE_TREE")"
           echo "/dts-v1/;" > "$DEVICE_TREE"
           echo "#include \"qcom,ipq5332.dtsi\"" >> "$DEVICE_TREE"
           echo "#include \"ipq807x.dtsi\"" >> "$DEVICE_TREE"
