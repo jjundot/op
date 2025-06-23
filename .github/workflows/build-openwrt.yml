@@ -235,19 +235,26 @@ jobs:
         else
           echo "⚠️ 未找到自定义脚本 $DIY_P1_SH，使用默认配置"
         fi
+    - name: Set terminal environment
+      run: |
+        echo "TERM=dumb" >> $GITHUB_ENV
+        echo "无人交互终端环境已设置"
 
-    - name: Load custom configuration
+        
+    - name: Fix missing dependencies
       run: |
         cd $OPENWRT_PATH
-        if [ -f "$GITHUB_WORKSPACE/scripts/$CONFIG_FILE" ]; then
-          cp $GITHUB_WORKSPACE/scripts/$CONFIG_FILE .config
-          echo "✅ 已加载自定义配置"
-          cat .config | grep -v '^#' | grep -v '^$' | wc -l > config_count.txt
-          echo "配置项数量: $(cat config_count.txt)"
-        else
-          echo "⚠️ 未找到自定义配置，使用默认配置"
-          make defconfig
-        fi
+        # 移除有依赖问题的软件包（可选）
+        sed -i '/CONFIG_PACKAGE_luci-app-samba/d' .config
+        sed -i '/CONFIG_PACKAGE_luci-app-mwan3helper/d' .config
+        sed -i '/CONFIG_PACKAGE_luci-app-passwall/d' .config
+        sed -i '/CONFIG_PACKAGE_nps/d' .config
+        
+        # 或者添加缺失的依赖（可选）
+        # echo "CONFIG_PACKAGE_chinadns-ng=y" >> .config
+        # echo "CONFIG_PACKAGE_dns2socks=y" >> .config
+        # echo "CONFIG_PACKAGE_tcping=y" >> .config
+        # echo "CONFIG_PACKAGE_pdnsd-alt=y" >> .config
 
     - name: Customize configuration (Part 2)
       run: |
