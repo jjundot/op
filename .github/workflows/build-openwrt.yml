@@ -159,7 +159,7 @@ jobs:
           EOF
         fi
         # 生成feeds.conf.default（严格格式，EOF必须顶格）
-        cat > feeds.conf.default << EOF
+        cat > feeds.conf.default << 'EOF'
         src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/ipq807x/generic/packages
         src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/base
         src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/luci
@@ -195,8 +195,6 @@ jobs:
           exit 1
         fi
 
-        
-        # 其余部分保持不变...
     - name: Customize feeds (Part 1)
       run: |
         if [ -f "$GITHUB_WORKSPACE/scripts/$DIY_P1_SH" ]; then
