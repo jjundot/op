@@ -132,66 +132,95 @@ jobs:
             echo "💥 无法获取IPQ807x目标支持，退出构建"
             exit 1
           fi
-        fi        
-        # 创建设备树（严格格式，无多余缩进）
+        fi
+        
+        # 创建设备树（改用sed，确保格式正确）
         DEVICE_TREE="qcom,ipq5322-jd-be6500.dts"
         DTS_DIR="target/linux/$ARCH/dts"
         mkdir -p "$DTS_DIR"
         if [ ! -f "$DTS_DIR/$DEVICE_TREE" ]; then
           echo "生成JD BE6500设备树..."
-          cat > "$DTS_DIR/$DEVICE_TREE" << 'EOF'
-          /dts-v1/;
-          #include "qcom,ipq5322.dtsi"
+          sed -e 's/^  //' > "$DTS_DIR/$DEVICE_TREE" << 'END_OF_DTS'
+            /dts-v1/;
+            #include "qcom,ipq5322.dtsi"
 
-          / {
-          model = "JD BE6500";
-          compatible = "qcom,ipq5322", "qcom,ipq5000";
+            / {
+              model = "JD BE6500";
+              compatible = "qcom,ipq5322", "qcom,ipq5000";
 
-          chosen {
-            bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";
-          };
+              chosen {
+                bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";
+              };
 
-          memory@80000000 {
-            device_type = "memory";
-            reg = <0x80000000 0x40000000>; /* 1GB */
-          };
-          };
-          EOF
+              memory@80000000 {
+                device_type = "memory";
+                reg = <0x80000000 0x40000000>; /* 1GB */
+              };
+            };
+          END_OF_DTS
+          
+          # 验证设备树语法
+          if command -v dtc &>/dev/null; then
+            dtc -I dts -O dtb -o /dev/null "$DTS_DIR/$DEVICE_TREE"
+            if [ $? -ne 0 ]; then
+              echo "❌ 设备树语法错误"
+              cat "$DTS_DIR/$DEVICE_TREE"
+              exit 1
+            else
+              echo "✅ 设备树语法验证通过"
+            fi
+          else
+            echo "⚠️ 未找到dtc工具，跳过设备树语法验证"
+          fi
         fi
-        # 生成feeds.conf.default（严格格式，EOF必须顶格）
-        cat > feeds.conf.default << 'EOF'
-        src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/ipq807x/generic/packages
-        src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/base
-        src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/luci
-        src-gz openwrt_packages https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/packages
-        src-git lienol https://github.com/Lienol/openwrt-package
-        EOF
         
-        # 更新Feeds（带重试机制）
+        # 生成feeds.conf.default（改用sed）
+        if [ ! -f "feeds.conf.default" ]; then
+          echo "生成feeds配置文件..."
+          sed -e 's/^  //' > feeds.conf.default << 'END_OF_FEEDS'
+            src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/ipq807x/generic/packages
+            src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/base
+            src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/luci
+            src-gz openwrt_packages https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/packages
+            src-git lienol https://github.com/Lienol/openwrt-package
+          END_OF_FEEDS
+        fi
+        
+        # 更新Feeds（带详细日志）
+        echo "开始更新feeds..."
         rm -rf feeds/*
         for i in {1..5}; do
-          echo "Attempt $i/5 to update feeds..."
-          ./scripts/feeds update -a 2>&1 | tee feeds.log
+          echo "尝试 $i/5 更新feeds..."
+          ./scripts/feeds update -a 2>&1 | tee feeds_update.log
           if [ $? -eq 0 ]; then
-            ./scripts/feeds install -a 2>&1 | tee -a feeds.log
+            echo "✅ Feeds更新成功，开始安装..."
+            ./scripts/feeds install -a 2>&1 | tee feeds_install.log
             if [ $? -eq 0 ]; then
               PACKAGE_COUNT=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
-              echo "找到 $PACKAGE_COUNT 个软件包"
+              echo "✅ 找到 $PACKAGE_COUNT 个软件包"
               # 写入目标配置
               echo "CONFIG_TARGET_ipq807x=y" >> .config
               echo "CONFIG_TARGET_ipq807x_generic=y" >> .config
               echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> .config
               break
+            else
+              echo "❌ Feeds安装失败，日志如下："
+              cat feeds_install.log
             fi
+          else
+            echo "❌ Feeds更新失败，日志如下："
+            cat feeds_update.log
           fi
+          
+          echo "清理并尝试重新更新..."
           rm -rf feeds/*
           sleep 15
         done
         
         # 检查Feeds更新结果
         if [ ! -d "feeds" ]; then
-          echo "Feeds更新失败，退出构建"
-          cat feeds.log
+          echo "💥 Feeds更新失败，退出构建"
+          cat feeds_update.log
           exit 1
         fi
 
@@ -200,9 +229,10 @@ jobs:
         if [ -f "$GITHUB_WORKSPACE/scripts/$DIY_P1_SH" ]; then
           cd $OPENWRT_PATH
           chmod +x $GITHUB_WORKSPACE/scripts/$DIY_P1_SH
+          echo "执行自定义脚本 $DIY_P1_SH..."
           $GITHUB_WORKSPACE/scripts/$DIY_P1_SH
         else
-          echo "未找到自定义脚本 $DIY_P1_SH"
+          echo "⚠️ 未找到自定义脚本 $DIY_P1_SH，使用默认配置"
         fi
 
     - name: Load custom configuration
@@ -210,9 +240,11 @@ jobs:
         cd $OPENWRT_PATH
         if [ -f "$GITHUB_WORKSPACE/scripts/$CONFIG_FILE" ]; then
           cp $GITHUB_WORKSPACE/scripts/$CONFIG_FILE .config
-          echo "已加载自定义配置"
+          echo "✅ 已加载自定义配置"
+          cat .config | grep -v '^#' | grep -v '^$' | wc -l > config_count.txt
+          echo "配置项数量: $(cat config_count.txt)"
         else
-          echo "未找到自定义配置，使用默认配置"
+          echo "⚠️ 未找到自定义配置，使用默认配置"
           make defconfig
         fi
 
@@ -221,28 +253,60 @@ jobs:
         if [ -f "$GITHUB_WORKSPACE/scripts/$DIY_P2_SH" ]; then
           cd $OPENWRT_PATH
           chmod +x $GITHUB_WORKSPACE/scripts/$DIY_P2_SH
+          echo "执行自定义配置脚本 $DIY_P2_SH..."
           $GITHUB_WORKSPACE/scripts/$DIY_P2_SH
         else
-          echo "未找到自定义脚本 $DIY_P2_SH"
+          echo "⚠️ 未找到自定义脚本 $DIY_P2_SH"
         fi
 
     - name: Download package dependencies
       run: |
         cd $OPENWRT_PATH
-        make download -j$(nproc)
+        echo "开始下载包依赖..."
+        make download -j$(nproc) V=s
+        DOWNLOAD_STATUS=$?
+        
         # 清理无效下载
+        echo "清理无效下载文件..."
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
+        
+        # 检查下载状态
+        if [ $DOWNLOAD_STATUS -ne 0 ]; then
+          echo "⚠️ 下载过程中可能存在错误，但继续构建..."
+        else
+          echo "✅ 包依赖下载完成"
+        fi
 
     - name: Build firmware
       run: |
         cd $OPENWRT_PATH
+        echo "开始编译固件..."
         echo "使用 $(nproc) 线程编译..."
-        make -j$(nproc) V=s || make -j1 V=s  # 并行编译，失败则单线程重试
+        
+        # 尝试并行编译，失败则单线程重试
+        make -j$(nproc) V=s || make -j1 V=s
+        
+        BUILD_STATUS=$?
+        if [ $BUILD_STATUS -ne 0 ]; then
+          echo "❌ 编译失败"
+          
+          # 收集错误日志
+          echo "收集编译错误日志..."
+          mkdir -p error_logs
+          find . -name "*.log" -exec cp {} error_logs/ \;
+          tar -czf error_logs.tar.gz error_logs
+          
+          exit $BUILD_STATUS
+        else
+          echo "✅ 固件编译成功"
+        fi
 
     - name: Check space usage
       run: |
+        echo "检查磁盘空间使用情况:"
         df -h
+        echo "OpenWrt bin目录大小:"
         du -sh $OPENWRT_PATH/bin
 
     - name: Collect firmware files
@@ -252,10 +316,22 @@ jobs:
         FIRMWARE_PATH=$(pwd)
         echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
         echo "::set-output name=status::success"
+        
+        # 检查是否有固件文件
         if [ -n "$(ls $FIRMWARE_PATH/*.bin 2>/dev/null)" ]; then
           echo "FILES_AVAILABLE=true" >> $GITHUB_ENV
+          echo "✅ 找到固件文件"
+          
+          # 列出所有固件文件
+          echo "固件文件列表:"
+          ls -lh $FIRMWARE_PATH/*.bin
         else
           echo "FILES_AVAILABLE=false" >> $GITHUB_ENV
+          echo "❌ 未找到固件文件"
+          
+          # 收集可用文件
+          echo "可用文件列表:"
+          ls -lh $FIRMWARE_PATH/* || true
         fi
 
     - name: Upload firmware as artifact
@@ -263,8 +339,9 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: OpenWrt-Firmware-${{ github.sha }}
-        path: ${{ env.FIRMWARE_PATH }}
+        path: ${{ env.FIRMWARE_PATH }}/*
         retention-days: 30
+        if-no-files-found: error
 
     - name: Upload firmware to Release
       if: steps.collect.outputs.status == 'success' && env.FILES_AVAILABLE == 'true' && env.UPLOAD_RELEASE == 'true' && github.event_name == 'release'
@@ -277,4 +354,4 @@ jobs:
           Built from commit ${{ github.sha }}
           Date: $(date +%Y-%m-%d)
       env:
-        GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}    
