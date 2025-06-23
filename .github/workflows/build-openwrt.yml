@@ -43,94 +43,64 @@ jobs:
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
-    - name: IPQ5322-specific feeds update (bash compatible)
+    - name: Lienol community branch build for IPQ5322
       run: |
         cd $OPENWRT_PATH
         
+        # 切换到Lienol社区分支（对IPQ5322支持更好）
+        echo "Cloning Lienol's OpenWrt branch for IPQ5322 support..."
+        git remote set-url origin https://github.com/Lienol/openwrt.git
+        git fetch origin master
+        git checkout master
+        
         # 定义IPQ5322专用架构信息
-        DEVICE_CHIP=ipq5322
-        OFFICIAL_ARCHES=("ipq8074" "ipq807x" "ipq8071")  # 可能的官方架构
-        COMMUNITY_ARCHES=("ipq5000" "ipq5322")          # 社区维护架构
-        STABLE_BRANCHES=("23.05.5" "23.05.4" "23.05.3" "23.05.2" "23.05.1" "23.05.0")
+        ARCH=ipq807x
+        SUBARCH=generic
+        CPU_ARCH=aarch64_cortex-a53
         
-        # 1. 检测可用的稳定分支
-        VALID_BRANCH=""
-        for branch in "${STABLE_BRANCHES[@]}"; do
-          BASE_URL="https://downloads.openwrt.org/releases/$branch"
-          if curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/targets" 2>/dev/null | grep -q "200"; then
-            VALID_BRANCH=$branch
-            echo "Found valid stable branch: $VALID_BRANCH"
-            break
-          fi
-        done
+        # 验证社区分支架构路径
+        BASE_URL="https://github.com/Lienol/openwrt/raw/master"
+        TARGET_PATH="$BASE_URL/target/linux/$ARCH"
         
-        # 2. 若稳定分支不可用，使用snapshot
-        if [ -z "$VALID_BRANCH" ]; then
-          VALID_BRANCH="snapshots"
-          BASE_URL="https://downloads.openwrt.org/snapshots"
-          echo "Falling back to snapshot branch"
+        if [ ! -d "target/linux/$ARCH" ]; then
+          echo "Cloning IPQ807x target support..."
+          git clone https://github.com/Lienol/openwrt-target-ipq807x target/linux/$ARCH
         fi
         
-        # 3. 检测官方架构路径（优先）
-        VALID_ARCH=""
-        VALID_SUBARCH=""
-        ARCH_FOUND=false
-        
-        for arch in "${OFFICIAL_ARCHES[@]}"; do
-          if [ "$ARCH_FOUND" = true ]; then break; fi
-          for subarch in "nand" "smp" "generic"; do
-            TARGET_PATH="$BASE_URL/targets/$arch/$subarch/packages"
-            if curl -s -o /dev/null -w "%{http_code}" "$TARGET_PATH" 2>/dev/null | grep -q "200"; then
-              VALID_ARCH=$arch
-              VALID_SUBARCH=$subarch
-              ARCH_FOUND=true
-              echo "Found official target path: $TARGET_PATH"
-              break 2
-            fi
-          done
-        done
-        
-        # 4. 检测社区架构路径（备用）
-        if [ "$ARCH_FOUND" = false ]; then
-          for arch in "${COMMUNITY_ARCHES[@]}"; do
-            if [ "$ARCH_FOUND" = true ]; then break; fi
-            for subarch in "nand" "smp" "generic"; do
-              TARGET_PATH="https://mirrors.cloud.tencent.com/openwrt/$VALID_BRANCH/targets/$arch/$subarch/packages"
-              if curl -s -o /dev/null -w "%{http_code}" "$TARGET_PATH" 2>/dev/null | grep -q "200"; then
-                VALID_ARCH=$arch
-                VALID_SUBARCH=$subarch
-                ARCH_FOUND=true
-                echo "Found community target path: $TARGET_PATH"
-                break 2
-              fi
-            done
-          done
+        # 确保设备树存在（京东BE6500）
+        DEVICE_TREE="qcom,ipq5322-jd-be6500.dts"
+        if [ ! -f "target/linux/$ARCH/dts/$DEVICE_TREE" ]; then
+          echo "Adding JD BE6500 device tree..."
+          cat > "target/linux/$ARCH/dts/$DEVICE_TREE" << EOF
+/dts-v1/;
+#include "qcom,ipq5322.dtsi"
+
+/ {
+  model = "JD BE6500";
+  compatible = "qcom,ipq5322", "qcom,ipq5000";
+  
+  chosen {
+    bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";
+  };
+  
+  memory@80000000 {
+    device_type = "memory";
+    reg = <0x80000000 0x40000000>; /* 1GB */
+  };
+};
+EOF
         fi
         
-        # 5. 若仍失败，输出可用架构列表
-        if [ "$ARCH_FOUND" = false ]; then
-          echo "Error: No valid path found for IPQ5322!"
-          echo "Available targets in $BASE_URL:"
-          curl -s "$BASE_URL/targets/" | grep -o '<a href="[^"]*">' | grep -o '[^"]*/' | sort -u
-          exit 1
-        fi
-        
-        # 6. 设置CPU架构
-        CPU_ARCH="aarch64_cortex-a53"
-        
-        # 7. 生成feeds.conf.default
+        # 生成feeds.conf.default（社区源）
         cat > feeds.conf.default << EOF
-        src-gz openwrt_core $BASE_URL/targets/$VALID_ARCH/$VALID_SUBARCH/packages
-        src-gz openwrt_base $BASE_URL/packages/$CPU_ARCH/base
-        src-gz openwrt_luci $BASE_URL/packages/$CPU_ARCH/luci
-        src-gz openwrt_packages $BASE_URL/packages/$CPU_ARCH/packages
+        src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/$ARCH/$SUBARCH/packages
+        src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/$CPU_ARCH/base
+        src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/$CPU_ARCH/luci
+        src-gz openwrt_packages https://openwrt.lienz.net/snapshots/packages/$CPU_ARCH/packages
+        src-git lienol https://github.com/Lienol/openwrt-package
         EOF
         
-        # 8. 添加社区软件包源（IPQ5322专用）
-        echo "src-git lienol https://github.com/Lienol/openwrt-package" >> feeds.conf.default
-        echo "src-git kenzo https://gitee.com/kenzok8/openwrt-packages" >> feeds.conf.default
-        
-        # 9. 清理并更新feeds
+        # 清理并更新feeds
         rm -rf feeds/*
         for i in {1..5}; do
           echo "Attempt $i/5 to update feeds..."
@@ -139,8 +109,14 @@ jobs:
             ./scripts/feeds install -a 2>&1 | tee -a feeds.log
             if [ $? -eq 0 ]; then
               PACKAGE_COUNT=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
-              if [ $PACKAGE_COUNT -ge 3000 ]; then
+              if [ $PACKAGE_COUNT -ge 4000 ]; then
                 echo "✅ Success: $PACKAGE_COUNT packages found"
+                
+                # 配置默认目标为IPQ807x
+                echo "CONFIG_TARGET_ipq807x=y" >> .config
+                echo "CONFIG_TARGET_ipq807x_generic=y" >> .config
+                echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> .config
+                
                 exit 0
               else
                 echo "Warning: Only $PACKAGE_COUNT packages found, but proceeding"
