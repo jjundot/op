@@ -190,6 +190,21 @@ jobs:
           exit 1
         fi
 
+    - name: Clean and update feeds (with deduplication)
+      run: |
+        cd $OPENWRT_PATH
+        # 清理重复源
+        sed -i '/^src-git.*lienol/d' feeds.conf.default
+        sed -i '/^src-git.*kenzo/d' feeds.conf.default
+        sed -i '/^src-git.*small/d' feeds.conf.default
+        # 确保唯一源
+        echo "src-git kenzo https://gitee.com/kenzok8/openwrt-packages" >> feeds.conf.default
+        echo "src-git small https://gitee.com/kenzok8/small" >> feeds.conf.default
+        echo "src-git lienol https://github.com/Lienol/openwrt-package" >> feeds.conf.default
+        # 强制更新feeds
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a --force-reinstall
+
     - name: Customize feeds (Part 1)
       run: |
         if [ -f "$GITHUB_WORKSPACE/scripts/$DIY_P1_SH" ]; then
