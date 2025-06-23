@@ -43,113 +43,112 @@ jobs:
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
-    - name: Final fix for OpenWrt feeds update
+    - name: IPQ5322-specific feeds update
       run: |
         cd $OPENWRT_PATH
         
-        # 检测可用的稳定分支（优先使用最新稳定版）
-        STABLE_BRANCHES=("23.05.2" "23.05.1" "23.05.0" "22.03.5" "22.03.4")
-        VALID_BRANCH=""
+        # 定义IPQ5322专用架构信息
+        DEVICE_CHIP=ipq5322
+        OFFICIAL_ARCHES=("ipq8074" "ipq807x" "ipq8071")  # 可能的官方架构
+        COMMUNITY_ARCHES=("ipq5000" "ipq5322")          # 社区维护架构
+        STABLE_BRANCHES=("23.05.5" "23.05.4" "23.05.3" "23.05.2" "23.05.1" "23.05.0")
         
+        # 1. 检测可用的稳定分支
+        VALID_BRANCH=""
         for branch in "${STABLE_BRANCHES[@]}"; do
-          echo "Checking branch $branch..."
-          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://downloads.openwrt.org/releases/$branch/targets/")
-          if [ "$HTTP_CODE" = "200" ]; then
+          BASE_URL="https://downloads.openwrt.org/releases/$branch"
+          if curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/targets" 2>/dev/null | grep -q "200"; then
             VALID_BRANCH=$branch
-            echo "Found valid branch: $VALID_BRANCH"
+            echo "Found valid stable branch: $VALID_BRANCH"
             break
           fi
         done
         
+        # 2. 若稳定分支不可用，使用snapshot
         if [ -z "$VALID_BRANCH" ]; then
-          echo "No valid stable branches found, falling back to snapshot"
-          BRANCH="snapshots"
+          VALID_BRANCH="snapshots"
           BASE_URL="https://downloads.openwrt.org/snapshots"
-        else
-          BRANCH=$VALID_BRANCH
-          BASE_URL="https://downloads.openwrt.org/releases/$BRANCH"
+          echo "Falling back to snapshot branch"
         fi
         
-        # 检测正确的目标架构路径（IPQ5322属于IPQ8074系列）
-        POSSIBLE_ARCHES=("ipq8074" "ipq807x" "ipq8071")
-        POSSIBLE_SUBARCHES=("generic" "nand" "smp")
+        # 3. 检测官方架构路径（优先）
         VALID_ARCH=""
         VALID_SUBARCH=""
-        
-        for arch in "${POSSIBLE_ARCHES[@]}"; do
-          for subarch in "${POSSIBLE_SUBARCHES[@]}"; do
+        for arch in "${OFFICIAL_ARCHES[@]}"; do
+          for subarch in "nand" "smp" "generic"; do
             TARGET_PATH="$BASE_URL/targets/$arch/$subarch/packages"
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$TARGET_PATH")
-            if [ "$HTTP_CODE" = "200" ]; then
+            if curl -s -o /dev/null -w "%{http_code}" "$TARGET_PATH" 2>/dev/null | grep -q "200"; then
               VALID_ARCH=$arch
               VALID_SUBARCH=$subarch
-              echo "Found valid target path: $TARGET_PATH"
-              break 2
+              echo "Found official target path: $TARGET_PATH"
+              goto FOUND_ARCH
             fi
           done
         done
         
+        # 4. 检测社区架构路径（备用）
+        FOUND_ARCH:
         if [ -z "$VALID_ARCH" ]; then
-          echo "Error: No valid target path found for IPQ5322!"
-          echo "Available targets:"
-          curl -s "https://downloads.openwrt.org/releases/$BRANCH/targets/" | grep -o '<a href="[^"]*">' | grep -o '[^"]*' | grep -v '/'
+          for arch in "${COMMUNITY_ARCHES[@]}"; do
+            for subarch in "nand" "smp" "generic"; do
+              TARGET_PATH="https://mirrors.cloud.tencent.com/openwrt/$VALID_BRANCH/targets/$arch/$subarch/packages"
+              if curl -s -o /dev/null -w "%{http_code}" "$TARGET_PATH" 2>/dev/null | grep -q "200"; then
+                VALID_ARCH=$arch
+                VALID_SUBARCH=$subarch
+                echo "Found community target path: $TARGET_PATH"
+                break 2
+              fi
+            done
+          done
+        fi
+        
+        # 5. 若仍失败，输出可用架构列表
+        if [ -z "$VALID_ARCH" ]; then
+          echo "Error: No valid path found for IPQ5322!"
+          echo "Available targets in $BASE_URL:"
+          curl -s "$BASE_URL/targets/" | grep -o '<a href="[^"]*">' | grep -o '[^"]*/' | sort -u
           exit 1
         fi
         
-        # 设置CPU架构（IPQ5322是ARM Cortex-A53）
+        # 6. 设置CPU架构
         CPU_ARCH="aarch64_cortex-a53"
         
-        # 写入正确的feeds.conf.default
+        # 7. 生成feeds.conf.default
         cat > feeds.conf.default << EOF
         src-gz openwrt_core $BASE_URL/targets/$VALID_ARCH/$VALID_SUBARCH/packages
         src-gz openwrt_base $BASE_URL/packages/$CPU_ARCH/base
         src-gz openwrt_luci $BASE_URL/packages/$CPU_ARCH/luci
         src-gz openwrt_packages $BASE_URL/packages/$CPU_ARCH/packages
-        src-gz openwrt_routing $BASE_URL/packages/$CPU_ARCH/routing
-        src-gz openwrt_telephony $BASE_URL/packages/$CPU_ARCH/telephony
         EOF
         
-        # 打印配置并验证
-        echo "Generated feeds.conf.default:"
-        cat feeds.conf.default
+        # 8. 添加社区软件包源（IPQ5322专用）
+        echo "src-git lienol https://github.com/Lienol/openwrt-package" >> feeds.conf.default
+        echo "src-git kenzo https://gitee.com/kenzok8/openwrt-packages" >> feeds.conf.default
         
-        # 清理所有旧feeds
+        # 9. 清理并更新feeds
         rm -rf feeds/*
-        
-        # 更新并安装feeds（带重试机制）
         for i in {1..5}; do
           echo "Attempt $i/5 to update feeds..."
-          ./scripts/feeds update -a 2>&1 | tee feeds_update.log
+          ./scripts/feeds update -a 2>&1 | tee feeds.log
           if [ $? -eq 0 ]; then
-            echo "Feeds updated successfully"
-            
-            echo "Installing packages..."
-            ./scripts/feeds install -a 2>&1 | tee feeds_install.log
+            ./scripts/feeds install -a 2>&1 | tee -a feeds.log
             if [ $? -eq 0 ]; then
-              echo "Packages installed successfully"
-              
-              # 验证包数量
               PACKAGE_COUNT=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
-              if [ $PACKAGE_COUNT -lt 2000 ]; then
-                echo "Warning: Only $PACKAGE_COUNT packages found (expected >2000)"
+              if [ $PACKAGE_COUNT -ge 3000 ]; then
+                echo "✅ Success: $PACKAGE_COUNT packages found"
+                exit 0
               else
-                echo "✅ Feeds update completed successfully"
+                echo "Warning: Only $PACKAGE_COUNT packages found, but proceeding"
+                exit 0
               fi
-              exit 0
-            else
-              echo "Package installation failed"
             fi
-          else
-            echo "Feeds update failed, retrying..."
           fi
-          
-          # 清理并等待
           rm -rf feeds/*
-          sleep 10
+          sleep 15
         done
         
         echo "Feeds update failed after 5 attempts!"
-        cat feeds_update.log
+        cat feeds.log
         exit 1
     - name: Customize feeds (Part 1)
       run: |
