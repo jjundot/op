@@ -44,7 +44,7 @@ jobs:
         cd openwrt
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
 
- - name: Auto-detect and fix feeds URL + Update with retry
+    - name: Auto-detect and fix feeds URL + Update with retry
       run: |
         cd $OPENWRT_PATH
         
