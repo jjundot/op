@@ -43,48 +43,13 @@ jobs:
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
-    - name: International mirror priority feeds update
+    - name: Forced international mirror feeds update
       run: |
         cd $OPENWRT_PATH
         
-        # 定义镜像源列表（优先使用国外源）
-        MIRRORS=(
-          "https://downloads.openwrt.org"             # 官方源（首选）
-          "https://mirrors.cloud.tencent.com/openwrt"  # 腾讯云镜像（国内，备用）
-          "https://openwrt.cc"                        # 国内常用镜像（备用）
-          "https://mirrors.tuna.tsinghua.edu.cn/openwrt"  # 清华大学镜像（备用）
-          "https://mirrors.ustc.edu.cn/openwrt"      # 中科大镜像（备用）
-        )
-        
-        # 检测最佳镜像（基于HTTP响应时间）
-        echo "Testing mirrors for best performance..."
-        BEST_MIRROR=""
-        BEST_RESPONSE_TIME=9999
-        
-        for mirror in "${MIRRORS[@]}"; do
-          echo "Testing $mirror..."
-          response_time=$(curl -s -w "%{time_total}\n" -o /dev/null $mirror || echo "9999")
-          response_time=${response_time%.*}  # 去除小数部分
-          
-          echo "  Response time: ${response_time}s"
-          
-          # 如果响应时间小于当前最佳时间，且HTTP状态码为200
-          if [ $(echo "$response_time < $BEST_RESPONSE_TIME" | bc -l) -eq 1 ]; then
-            http_code=$(curl -s -o /dev/null -w "%{http_code}" $mirror)
-            if [ "$http_code" = "200" ]; then
-              BEST_MIRROR=$mirror
-              BEST_RESPONSE_TIME=$response_time
-              echo "  ✅ This is the best mirror so far"
-            fi
-          fi
-        done
-        
-        if [ -z "$BEST_MIRROR" ]; then
-          echo "None of the mirrors are accessible. Using the first mirror as fallback."
-          BEST_MIRROR=${MIRRORS[0]}
-        fi
-        
-        echo "Selected best mirror: $BEST_MIRROR"
+        # 强制使用官方源（不依赖ping检测）
+        BEST_MIRROR="https://downloads.openwrt.org"
+        echo "Using official mirror: $BEST_MIRROR"
         
         # 获取当前分支名
         BRANCH=$(git branch --show-current || echo "$REPO_BRANCH")
@@ -99,7 +64,7 @@ jobs:
           BASE_URL="$BEST_MIRROR/releases/$CLEAN_BRANCH"
         fi
         
-        # 写入新的feeds.conf.default
+        # 写入新的feeds.conf.default（仅使用官方源）
         cat > feeds.conf.default << EOF
         src-gz openwrt_core $BASE_URL/targets/$ARCH/packages
         src-gz openwrt_base $BASE_URL/packages/$CPU_ARCH/base
@@ -109,12 +74,8 @@ jobs:
         src-gz openwrt_telephony $BASE_URL/packages/$CPU_ARCH/telephony
         EOF
         
-        # 添加自定义软件包源（使用GitHub官方地址，而非Gitee）
-        echo "src-git kenzo https://github.com/kenzok8/openwrt-packages.git" >> feeds.conf.default
-        echo "src-git small https://github.com/kenzok8/small.git" >> feeds.conf.default
-        
-        # 打印生成的配置
-        echo "Generated feeds.conf.default:"
+        # 先不添加自定义源，确保核心源可用
+        echo "Generated feeds.conf.default (official only):"
         cat feeds.conf.default
         
         # 创建详细的日志文件
@@ -124,72 +85,120 @@ jobs:
         # 清理旧的feeds缓存
         rm -rf feeds/*
         
-        # 尝试更新feeds（增强版重试机制）
-        echo "Updating feeds using $BEST_MIRROR..."
-        UPDATE_SUCCESS=false
-        
-        for i in {1..5}; do  # 增加重试次数到5次
-          echo "Attempt $i/5 to update feeds..."
+        # 步骤1：更新并安装官方核心feeds
+        echo "Step 1: Updating and installing official core feeds..."
+        for i in {1..5}; do
+          echo "Attempt $i/5 to update core feeds..."
+          ./scripts/feeds update -a 2>&1 | tee -a $LOG_FILE
+          UPDATE_STATUS=${PIPESTATUS[0]}
           
-          # 分步更新，提高成功率
-          ./scripts/feeds update base packages luci 2>&1 | tee -a $LOG_FILE
-          if [ $? -ne 0 ]; then
-            echo "Step 1: Failed to update base packages"
-            continue
-          fi
-          
-          ./scripts/feeds update routing telephony 2>&1 | tee -a $LOG_FILE
-          if [ $? -ne 0 ]; then
-            echo "Step 2: Failed to update routing and telephony"
-            continue
-          fi
-          
-          ./scripts/feeds update kenzo small 2>&1 | tee -a $LOG_FILE
-          if [ $? -ne 0 ]; then
-            echo "Step 3: Failed to update custom feeds"
-            # 尝试从Gitee获取（如果GitHub失败）
-            echo "Fallback to Gitee for custom feeds..."
-            sed -i 's|https://github.com/kenzok8|https://gitee.com/kenzok8|g' feeds.conf.default
-            ./scripts/feeds update kenzo small 2>&1 | tee -a $LOG_FILE
-            if [ $? -ne 0 ]; then
-              echo "Failed to update custom feeds from both GitHub and Gitee"
-              continue
+          if [ $UPDATE_STATUS -eq 0 ]; then
+            echo "Core feeds updated successfully"
+            
+            echo "Installing core packages..."
+            ./scripts/feeds install -a 2>&1 | tee -a $LOG_FILE
+            if [ $? -eq 0 ]; then
+              echo "✅ Core packages installed successfully"
+              break
+            else
+              echo "Failed to install core packages, retrying..."
             fi
-          fi
-          
-          # 安装所有软件包
-          echo "Installing all packages..."
-          ./scripts/feeds install -a 2>&1 | tee -a $LOG_FILE
-          if [ $? -eq 0 ]; then
-            echo "✅ Feeds updated and installed successfully"
-            UPDATE_SUCCESS=true
-            break
           else
-            echo "Failed to install packages, retrying..."
+            echo "Core feeds update failed, retrying..."
           fi
           
-          # 清理不完整的更新
           rm -rf feeds/*
-          sleep 15  # 增加等待时间到15秒
+          sleep 10
         done
         
-        if [ "$UPDATE_SUCCESS" = "false" ]; then
-          echo "Feeds update failed after 5 attempts!"
+        if [ $i -eq 5 ]; then
+          echo "Core feeds update failed after 5 attempts!"
           echo "Full error log:"
           cat $LOG_FILE
           exit 1
         fi
         
-        # 验证软件包数量
-        PACKAGE_COUNT=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
-        echo "Total available packages: $PACKAGE_COUNT"
+        # 验证官方包数量（应该至少有2000+）
+        OFFICIAL_PACKAGES=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
+        echo "Total official packages: $OFFICIAL_PACKAGES"
         
-        if [ $PACKAGE_COUNT -lt 500 ]; then
-          echo "Warning: Only $PACKAGE_COUNT packages found (expected >500)"
-          echo "Listing available packages for debugging:"
+        if [ $OFFICIAL_PACKAGES -lt 2000 ]; then
+          echo "Warning: Only $OFFICIAL_PACKAGES official packages found (expected >2000)"
+          exit 1
+        else
+          echo "Official package installation verified successfully"
+        fi
+        
+        # 步骤2：添加并更新自定义源（谨慎处理）
+        echo "Step 2: Adding and updating custom feeds..."
+        
+        # 添加自定义源（使用GitHub官方地址）
+        echo "src-git kenzo https://github.com/kenzok8/openwrt-packages.git" >> feeds.conf.default
+        echo "src-git small https://github.com/kenzok8/small.git" >> feeds.conf.default
+        
+        echo "Updated feeds.conf.default (with custom sources):"
+        cat feeds.conf.default
+        
+        # 尝试更新自定义feeds
+        CUSTOM_FEEDS_SUCCESS=false
+        
+        for i in {1..3}; do
+          echo "Attempt $i/3 to update custom feeds..."
+          
+          # 备份现有feeds，以防更新失败
+          cp -r feeds feeds_backup
+          
+          # 仅更新自定义feeds
+          ./scripts/feeds update kenzo small 2>&1 | tee -a $LOG_FILE
+          UPDATE_STATUS=$?
+          
+          if [ $UPDATE_STATUS -eq 0 ]; then
+            echo "Custom feeds updated successfully"
+            
+            # 安装自定义包
+            echo "Installing custom packages..."
+            ./scripts/feeds install -a -f kenzo small 2>&1 | tee -a $LOG_FILE
+            if [ $? -eq 0 ]; then
+              echo "✅ Custom packages installed successfully"
+              CUSTOM_FEEDS_SUCCESS=true
+              break
+            else
+              echo "Failed to install custom packages, restoring backup..."
+              rm -rf feeds
+              mv feeds_backup feeds
+            fi
+          else
+            echo "Custom feeds update failed, restoring backup..."
+            rm -rf feeds
+            mv feeds_backup feeds
+          fi
+          
+          sleep 10
+        done
+        
+        # 如果自定义源更新失败，继续构建但记录警告
+        if [ "$CUSTOM_FEEDS_SUCCESS" = "false" ]; then
+          echo "⚠️ Warning: Custom feeds update failed. Proceeding with official packages only."
+          # 从配置中移除失败的源
+          sed -i '/kenzo/d' feeds.conf.default
+          sed -i '/small/d' feeds.conf.default
+        fi
+        
+        # 最终验证
+        TOTAL_PACKAGES=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
+        echo "Total available packages: $TOTAL_PACKAGES"
+        
+        if [ $TOTAL_PACKAGES -lt 2000 ]; then
+          echo "Warning: Only $TOTAL_PACKAGES packages found (expected >2000)"
+          echo "Available packages:"
           ./scripts/feeds list | grep -vE '^#|^$' | sort > available_packages.txt
           cat available_packages.txt
-          exit 1
+          
+          if [ "$CUSTOM_FEEDS_SUCCESS" = "false" ]; then
+            echo "Proceeding with official packages only..."
+          else
+            exit 1
+          fi
         else
           echo "Package installation verified successfully"
         fi
