@@ -19,7 +19,7 @@ env:
   UPLOAD_FIRMWARE: true
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # 需在仓库Secrets中配置
+  MY_TOKEN: ${{ secrets.MY_TOKEN }}  # 需在仓库Secrets中配置
 
 jobs:
   build:
@@ -48,8 +48,8 @@ jobs:
         rm -rf openwrt
         for i in {1..3}; do
           echo "Attempt $i/3 to clone Lienol's OpenWrt repo..."
-          # 使用GITHUB_TOKEN进行HTTPS认证
-          git clone --depth=1 "https://${GITHUB_TOKEN}@github.com/Lienol/openwrt.git" -b $LIENOL_BRANCH openwrt
+          # 使用MY_TOKEN进行HTTPS认证
+          git clone --depth=1 "https://${MY_TOKEN}@github.com/Lienol/openwrt.git" -b $LIENOL_BRANCH openwrt
           if [ $? -eq 0 ]; then
             echo "Repo cloned successfully"
             break
@@ -73,7 +73,7 @@ jobs:
         # 确保IPQ807x架构目录存在（使用HTTPS认证）
         if [ ! -d "target/linux/$ARCH" ]; then
           echo "Cloning IPQ807x target support..."
-          git clone "https://${GITHUB_TOKEN}@github.com/Lienol/openwrt-target-ipq807x.git" target/linux/$ARCH
+          git clone "https://${MY_TOKEN}@github.com/Lienol/openwrt-target-ipq807x.git" target/linux/$ARCH
         fi
         
         # 确保设备树存在（京东BE6500）
@@ -225,4 +225,4 @@ jobs:
           Built from commit ${{ github.sha }}
           Date: $(date +%Y-%m-%d)
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        MY_TOKEN: ${{ secrets.MY_TOKEN }}
