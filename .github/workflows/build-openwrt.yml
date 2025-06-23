@@ -36,9 +36,10 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04                                 # 运行环境
-    container:
-      image: openwrt/sdk:23.05.0-x86-64                   # 使用官方SDK容器
+    runs-on: ubuntu-22.04                                 # 直接使用Ubuntu环境
+    # 移除容器配置
+    # container:
+    #   image: openwrt/sdk:23.05.0-x86-64
 
     steps:
     - name: 检查环境
@@ -48,12 +49,14 @@ jobs:
         cat /proc/cpuinfo
         cat /etc/os-release
 
-    - name: 安装基础依赖
+    - name: 安装OpenWrt编译依赖
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential subversion git-core libncurses5-dev zlib1g-dev gawk flex quilt libssl-dev xsltproc libxml-parser-perl mercurial bzr ecj cvs unzip python3-distutils file wget upx-ucl python3-pip
-        sudo pip install requests tqdm  # 用于下载辅助
-        sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk
+        # 安装OpenWrt官方推荐的编译依赖
+        sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
+          gettext git java-propose-classpath libelf-dev libncurses5-dev \
+          libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools \
+          python3-dev rsync subversion swig time unzip wget xmlto zlib1g-dev
 
     - name: 配置Git凭证
       run: |
