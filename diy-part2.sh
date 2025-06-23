@@ -63,14 +63,30 @@ git clone https://github.com/rufengsuixing/luci-app-adguardhome package/custom/a
 git clone https://github.com/cnsilvan/luci-app-samba4 package/custom/samba4
 git clone https://github.com/lisaac/luci-app-dockerman package/custom/dockerman
 
-# 添加缺失的依赖包
-git clone https://github.com/openwrt/packages.git -b openwrt-23.05 feeds/packages
-git clone https://github.com/openwrt/luci.git -b openwrt-23.05 feeds/luci
-
-# 修复passwall依赖
-pushd package/custom/passwall
-git submodule update --init --recursive
+# 修复依赖的关键步骤
+pushd package/custom
+# 手动克隆缺失依赖的软件包
+git clone https://github.com/fw876/helloworld.git helloworld  # 包含chinadns-ng/dns2socks/tcping
+git clone https://github.com/openwrt/packages.git -b openwrt-23.05 packages  # 包含upx/host
 popd
+
+# 明确启用缺失的依赖包
+cat >> .config << EOF
+CONFIG_PACKAGE_luci-app-samba4=y
+CONFIG_PACKAGE_pdnsd-alt=y
+CONFIG_PACKAGE_chinadns-ng=y
+CONFIG_PACKAGE_dns2socks=y
+CONFIG_PACKAGE_tcping=y
+CONFIG_PACKAGE_upx=y
+CONFIG_PACKAGE_helloworld=y  # 启用helloworld包集合
+CONFIG_PACKAGE_kmod-ath11k-ct=y  # IPQ5332 Wi-Fi驱动
+CONFIG_PACKAGE_ath11k-firmware-qca64=y  # IPQ5332 Wi-Fi固件
+CONFIG_PACKAGE_kmod-qca-ppe=y  # IPQ5332 PPE加速模块
+CONFIG_PACKAGE_luci-app-turboacc=y  # Turbo ACC网络加速
+EOF
+
+# 确保passwall依赖被正确识别
+sed -i 's/DEPENDS:=\@LUCI/DEPENDS:=\@LUCI +chinadns-ng +dns2socks +tcping/g' package/custom/passwall/luci-app-passwall/Makefile
 
 # 优化系统参数（合并重复配置）
 cat > package/base-files/files/etc/sysctl.conf << EOF
@@ -144,10 +160,9 @@ pushd feeds/packages/utils/upx
 make package/compile V=s
 popd
 
-# 明确添加缺失的依赖到配置
-echo "CONFIG_PACKAGE_luci-app-samba4=y" >> .config
-echo "CONFIG_PACKAGE_pdnsd-alt=y" >> .config
-echo "CONFIG_PACKAGE_chinadns-ng=y" >> .config
-echo "CONFIG_PACKAGE_dns2socks=y" >> .config
-echo "CONFIG_PACKAGE_tcping=y" >> .config
-echo "CONFIG_PACKAGE_upx=y" >> .config
+# 修复luci-app-mwan3helper依赖问题
+sed -i 's/pdnsd-alt/pdnsd/g' package/feeds/other/luci-app-mwan3helper/Makefile
+echo "CONFIG_PACKAGE_pdnsd=y" >> .config
+
+# 确保所有依赖包被包含
+make defconfig
