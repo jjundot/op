@@ -74,24 +74,25 @@ jobs:
         DEVICE_TREE="qcom,ipq5322-jd-be6500.dts"
         if [ ! -f "target/linux/$ARCH/dts/$DEVICE_TREE" ]; then
           echo "Adding JD BE6500 device tree..."
-          cat > "target/linux/$ARCH/dts/$DEVICE_TREE" << 'EOF'  # 使用单引号防止变量扩展
-/dts-v1/;
-
-/ {
-  model = "JD BE6500";
-  compatible = "qcom,ipq5322", "qcom,ipq5000";
+          cat > "target/linux/$ARCH/dts/$DEVICE_TREE" << 'EOF'  
+          # 使用单引号防止变量扩展
+          /dts-v1/;
+          #include "qcom,ipq5322.dtsi"
+          / {
+            model = "JD BE6500";
+            compatible = "qcom,ipq5322", "qcom,ipq5000";
   
-  chosen {
-    bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";
-  };
+            chosen {
+              bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";
+            };
   
-  memory@80000000 {
-    device_type = "memory";
-    reg = <0x80000000 0x40000000>; /* 1GB */
-  };
-};
-EOF
-        fi
+            memory@80000000 {
+            device_type = "memory";
+            reg = <0x80000000 0x40000000>; /* 1GB */
+            };
+           };
+           EOF
+          fi
         
         # 生成feeds.conf.default（移除多余缩进）
         cat > feeds.conf.default << 'EOF'
