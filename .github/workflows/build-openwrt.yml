@@ -87,7 +87,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ${{ env.CACHE_DIR }}
-        key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/dl/**', 'feeds.conf.default') }}
+        key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/dl/**', 'feeds.conf.default', '.config') }}
         restore-keys: |
           ${{ runner.os }}-openwrt-dl-
 
@@ -229,29 +229,30 @@ jobs:
           echo "✅ 所有依赖已安装"
         fi
 
-    - name: 基础配置生成（强制目标平台）
+    - name: 基础配置生成（保留并强化目标平台）
       run: |
         cd $OPENWRT_PATH
-        # 清空原有配置（避免默认配置干扰）
-        > .config
+        # 保留原有.config配置（不再清空）
+        if [ -f "$CONFIG_FILE" ]; then
+          echo "✅ 检测到已有配置文件，直接使用"
+        else
+          # 生成默认配置
+          make defconfig
+        fi
         
-        # 生成默认配置
-        make defconfig
-        
-        # 强制设置IPQ807x目标平台（IPQ5332适配）
+        # 强制设置IPQ807x目标平台（IPQ5332适配，追加配置避免覆盖）
         echo "CONFIG_TARGET_ipq807x=y" >> .config
         echo "CONFIG_TARGET_ipq807x_generic=y" >> .config
-        echo "CONFIG_TARGET_IPQ807X_DEVICE_generic=y" >> .config
         echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> .config  # 关键：指定设备树目标
         echo "CONFIG_TARGET_KERNEL_PARTSIZE=16" >> .config         # 设置固件分区大小（MB）
         
-        # 启用必要的基础包
+        # 启用必要的基础包（追加方式）
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_PACKAGE_luci-ssl=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-ath11k-ct=y" >> .config       # Wi-Fi 7驱动
-        echo "CONFIG_PACKAGE_kmod-qca-ppe=y" >> .config        # PPE加速模块
-        echo "CONFIG_PACKAGE_fstools=y" >> .config             # 固件工具
-        echo "CONFIG_PACKAGE_partx=y" >> .config               # 分区工具
+        echo "CONFIG_PACKAGE_kmod-ath11k-ct=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-qca-ppe=y" >> .config
+        echo "CONFIG_PACKAGE_fstools=y" >> .config
+        echo "CONFIG_PACKAGE_partx=y" >> .config
         
         # 显示当前配置（用于调试）
         echo "=== 当前.config 目标配置 ==="
@@ -260,7 +261,7 @@ jobs:
     - name: 动态依赖配置（根据输入参数）
       run: |
         cd $OPENWRT_PATH
-        # 根据用户输入启用功能
+        # 根据用户输入启用功能（追加方式）
         if [ ${{ github.event.inputs.with_wsdd2 == 'true' }} ]; then
           echo "CONFIG_PACKAGE_wsdd2=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-wsdd2=y" >> .config
@@ -271,7 +272,7 @@ jobs:
           echo "CONFIG_PACKAGE_luci-app-samba4=y" >> .config
         fi
         
-        # 修复历史依赖问题
+        # 修复历史依赖问题（追加方式）
         echo "CONFIG_PACKAGE_libpam=y" >> .config
         echo "CONFIG_PACKAGE_liblzma=y" >> .config
         echo "CONFIG_PACKAGE_libnetsnmp=y" >> .config
@@ -279,6 +280,30 @@ jobs:
         # 显示关键配置
         echo "=== 关键配置 ==="
         grep -E "CONFIG_TARGET|CONFIG_PACKAGE_(samba|wsdd2|libpam)" .config
+
+    - name: 设备树强制关联（关键修复）
+      run: |
+        cd $OPENWRT_PATH
+        echo "=== 强制关联设备树到编译系统 ==="
+        
+        # 检查设备树是否被编译系统识别
+        if ! grep -q "jd-be6500" target/linux/ipq807x/image/Makefile; then
+          echo "❌ 设备树未被识别，手动添加到Makefile..."
+          
+          # 手动添加设备树定义到Makefile（适用于Lienol分支）
+          sed -i '/define Device\/generic/a \
+          define Device\/jd-be6500\n  $(Device\/generic)\n  DEVICE_TITLE := JD BE6500 (IPQ5332)\n  DEVICE_DTS := qcom,ipq5332-jd-be6500\n  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe\nendef\n$(eval $(call Device,jd-be6500))' target/linux/ipq807x/image/Makefile
+          
+          # 验证修改
+          if grep -q "jd-be6500" target/linux/ipq807x/image/Makefile; then
+            echo "✅ 设备树已成功添加到Makefile"
+          else
+            echo "❌ 设备树添加失败，退出"
+            exit 1
+          fi
+        else
+          echo "✅ 设备树已被编译系统识别"
+        fi
 
     - name: 下载依赖包（带缓存）
       run: |
@@ -345,24 +370,31 @@ jobs:
           echo "✅ 并行编译成功"
         fi
 
-    - name: 固件完整性检查（精准定位目标目录）
+    - name: 固件完整性检查（多级路径检测）
       run: |
-        cd $OPENWRT_PATH/bin/targets
-        # 动态定位ipq807x目标目录
-        IPQ807X_DIR=$(find . -type d -name "ipq807x" 2>/dev/null)
+        cd $OPENWRT_PATH/bin
+        # 优先检测ipq807x目标（三级路径检测）
+        IPQ807X_DIR=$(find . -type d -name "ipq807x" 2>/dev/null | head -n1)
         if [ -z "$IPQ807X_DIR" ]; then
-          echo "❌ 未找到ipq807x目标目录"
-          echo "可用目标目录:"
-          find . -type d -name "*" | grep targets
-          exit 1
+          IPQ807X_DIR=$(find . -type d -name "qcom" 2>/dev/null | head -n1)
+          if [ -z "$IPQ807X_DIR" ]; then
+            echo "❌ 未找到ipq807x/qcom目标目录"
+            echo "可用目标目录:"
+            find . -type d -name "*" | grep targets
+            exit 1
+          fi
         fi
         
         FIRMWARE_PATH="$IPQ807X_DIR/generic"
         if [ ! -d "$FIRMWARE_PATH" ]; then
-          echo "❌ 未找到ipq807x/generic 目录"
-          echo "可用目录:"
-          find "$IPQ807X_DIR" -type d
-          exit 1
+          FIRMWARE_PATH="$IPQ807X_DIR/*/generic"
+          FIRMWARE_PATH=$(echo $FIRMWARE_PATH | sed 's|/*/generic|/generic|')
+          if [ ! -d "$FIRMWARE_PATH" ]; then
+            echo "❌ 未找到通用固件目录"
+            echo "可用目录:"
+            find "$IPQ807X_DIR" -type d
+            exit 1
+          fi
         fi
         
         echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
