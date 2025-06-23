@@ -156,7 +156,7 @@ jobs:
               reg = <0x80000000 0x40000000>; /* 1GB */
               };
             };
-EOF
+          EOF
         fi
         # 生成feeds.conf.default（严格格式，EOF必须顶格）
         cat > feeds.conf.default << 'EOF'
@@ -165,7 +165,7 @@ EOF
           src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/luci
           src-gz openwrt_packages https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/packages
           src-git lienol https://github.com/Lienol/openwrt-package
-EOF
+        EOF
         
         # 更新Feeds（带重试机制）
         rm -rf feeds/*
