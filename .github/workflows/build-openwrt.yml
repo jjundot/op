@@ -43,31 +43,36 @@ jobs:
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
-    - name: Use Chinese mirrors + Update with retry
+    - name: Enhanced feeds update with Chinese mirrors
       run: |
         cd $OPENWRT_PATH
         
-        # 网络诊断（仅检查国内镜像）
+        # 网络诊断（检查所有关键源）
         echo "Network diagnosis:"
         ping -c 3 mirrors.tuna.tsinghua.edu.cn
         ping -c 3 gitee.com
+        ping -c 3 github.com
+        
+        # 检查关键域名的curl响应
+        echo "Checking domain availability:"
         curl -sI https://mirrors.tuna.tsinghua.edu.cn/openwrt || echo "TUNA mirror is unreachable"
+        curl -sI https://gitee.com/kenzok8/openwrt-packages || echo "Kenzo's repo is unreachable"
+        curl -sI https://github.com/openwrt/openwrt || echo "OpenWrt GitHub repo is unreachable"
         
         # 获取当前分支名
         BRANCH=$(git branch --show-current || echo "$REPO_BRANCH")
-        ARCH=qca-ipq807x/generic  # 针对JD BE6500的架构
-        CPU_ARCH=aarch64_cortex-a53  # 针对IPQ5322的CPU架构
+        ARCH=qca-ipq807x/generic
+        CPU_ARCH=aarch64_cortex-a53
         
         # 使用清华大学镜像源
         if [[ $BRANCH == "master" || $BRANCH == "dev" ]]; then
           BASE_URL="https://mirrors.tuna.tsinghua.edu.cn/openwrt/snapshots"
         else
-          # 移除v前缀（如果存在）
           CLEAN_BRANCH=${BRANCH#v}
           BASE_URL="https://mirrors.tuna.tsinghua.edu.cn/openwrt/releases/$CLEAN_BRANCH"
         fi
         
-        # 写入新的feeds.conf.default（全部使用国内镜像）
+        # 写入新的feeds.conf.default
         cat > feeds.conf.default << EOF
         src-gz openwrt_core $BASE_URL/targets/$ARCH/packages
         src-gz openwrt_base $BASE_URL/packages/$CPU_ARCH/base
@@ -77,7 +82,7 @@ jobs:
         src-gz openwrt_telephony $BASE_URL/packages/$CPU_ARCH/telephony
         EOF
         
-        # 使用Gitee镜像替代GitHub源（提高国内访问速度）
+        # 使用Gitee镜像替代GitHub源
         echo "src-git kenzo https://gitee.com/kenzok8/openwrt-packages.git" >> feeds.conf.default
         echo "src-git small https://gitee.com/kenzok8/small.git" >> feeds.conf.default
         
@@ -85,60 +90,93 @@ jobs:
         echo "Generated feeds.conf.default:"
         cat feeds.conf.default
         
+        # 创建详细的日志文件
+        LOG_FILE="feeds_update.log"
+        touch $LOG_FILE
+        
         # 清理旧的feeds缓存
         rm -rf feeds/*
         
-        # 3次重试机制，先更新核心feeds，再更新自定义feeds
+        # 分步更新和安装核心feeds
+        echo "Updating core feeds..."
         for i in {1..3}; do
           echo "Attempt $i/3 to update core feeds..."
-          ./scripts/feeds update -a || true  # 允许失败，以便清理
-          rm -rf feeds/*  # 清理可能不完整的更新
-          
-          # 详细的更新过程
-          echo "Updating core feeds:"
-          ./scripts/feeds update base packages luci routing telephony
-          UPDATE_STATUS=$?
+          ./scripts/feeds update base packages luci routing telephony 2>&1 | tee -a $LOG_FILE
+          UPDATE_STATUS=${PIPESTATUS[0]}
           
           if [ $UPDATE_STATUS -eq 0 ]; then
             echo "Core feeds updated successfully"
             break
           else
             echo "Core feeds update failed, retrying..."
-            # 打印更详细的错误日志
-            find feeds -name "error.log" -exec cat {} \; 2>/dev/null
+            cat $LOG_FILE | tail -n 20  # 打印最后20行日志
           fi
           
           if [ $i -eq 3 ]; then
             echo "Core feeds update failed after 3 retries!"
+            echo "Full error log:"
+            cat $LOG_FILE
             exit 1
           fi
-          sleep 10  # 等待10秒重试
+          sleep 10
         done
         
-        # 单独更新自定义feeds（如kenzo、small）
+        # 安装核心feeds包
+        echo "Installing core packages..."
+        ./scripts/feeds install -a base packages luci routing telephony 2>&1 | tee -a $LOG_FILE
+        if [ $? -ne 0 ]; then
+          echo "Failed to install core packages!"
+          echo "Full error log:"
+          cat $LOG_FILE
+          exit 1
+        fi
+        
+        # 更新自定义feeds
+        echo "Updating custom feeds..."
         for i in {1..3}; do
           echo "Attempt $i/3 to update custom feeds..."
-          ./scripts/feeds update kenzo small
-          CUSTOM_STATUS=$?
+          ./scripts/feeds update kenzo small 2>&1 | tee -a $LOG_FILE
+          UPDATE_STATUS=${PIPESTATUS[0]}
           
-          if [ $CUSTOM_STATUS -eq 0 ]; then
+          if [ $UPDATE_STATUS -eq 0 ]; then
             echo "Custom feeds updated successfully"
             break
           else
             echo "Custom feeds update failed, retrying..."
-            find feeds -name "error.log" -exec cat {} \; 2>/dev/null
+            cat $LOG_FILE | tail -n 20
           fi
           
           if [ $i -eq 3 ]; then
             echo "Custom feeds update failed after 3 retries!"
+            echo "Full error log:"
+            cat $LOG_FILE
             exit 1
           fi
-          sleep 10  # 等待10秒重试
+          sleep 10
         done
         
-        # 安装所有feeds包
-        echo "Installing all packages..."
-        ./scripts/feeds install -a
+        # 安装自定义feeds包
+        echo "Installing custom packages..."
+        ./scripts/feeds install -a kenzo small 2>&1 | tee -a $LOG_FILE
+        if [ $? -ne 0 ]; then
+          echo "Failed to install custom packages!"
+          echo "Full error log:"
+          cat $LOG_FILE
+          exit 1
+        fi
+        
+        # 验证所有包是否正确安装
+        echo "Verifying package installation..."
+        PACKAGES=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
+        echo "Total available packages: $PACKAGES"
+        
+        if [ $PACKAGES -lt 100 ]; then  # 检查是否至少有100个包
+          echo "Warning: Only $PACKAGES packages found, possible installation issue!"
+          ./scripts/feeds list | grep -vE '^#|^$' | sort
+          exit 1
+        else
+          echo "Package installation verified successfully"
+        fi
     - name: Customize feeds (Part 1)
       run: |
         if [ -f "$GITHUB_WORKSPACE/scripts/$DIY_P1_SH" ]; then
