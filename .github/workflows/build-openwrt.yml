@@ -141,22 +141,22 @@ jobs:
         if [ ! -f "$DTS_DIR/$DEVICE_TREE" ]; then
           echo "生成JD BE6500设备树..."
           cat > "$DTS_DIR/$DEVICE_TREE" << 'EOF'
-            /dts-v1/;
-            #include "qcom,ipq5322.dtsi"
+          /dts-v1/;
+          #include "qcom,ipq5322.dtsi"
 
-            / {
-              model = "JD BE6500";
-              compatible = "qcom,ipq5322", "qcom,ipq5000";
+          / {
+          model = "JD BE6500";
+          compatible = "qcom,ipq5322", "qcom,ipq5000";
 
-              chosen {
-                bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";
-              };
+          chosen {
+            bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";
+          };
 
-              memory@80000000 {
-                device_type = "memory";
-                reg = <0x80000000 0x40000000>; /* 1GB */
-              };
+          memory@80000000 {
+            device_type = "memory";
+            reg = <0x80000000 0x40000000>; /* 1GB */
             };
+          };
           EOF
         fi
         
