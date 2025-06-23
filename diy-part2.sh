@@ -12,7 +12,7 @@ sed -i 's/UTC/CST-8/g' package/base-files/files/bin/config_generate  # 设置时
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
 
 # 调整无线驱动参数（针对IPQ5332）
-# 优化：使用更准确的无线配置方式
+# 使用更准确的无线配置方式
 cat > package/kernel/mac80211/files/lib/wifi/mac80211.sh << EOF
 #!/bin/sh
 
@@ -62,6 +62,15 @@ git clone https://github.com/xiaorouji/openwrt-passwall package/custom/passwall
 git clone https://github.com/rufengsuixing/luci-app-adguardhome package/custom/adguardhome
 git clone https://github.com/cnsilvan/luci-app-samba4 package/custom/samba4
 git clone https://github.com/lisaac/luci-app-dockerman package/custom/dockerman
+
+# 添加缺失的依赖包
+git clone https://github.com/openwrt/packages.git -b openwrt-23.05 feeds/packages
+git clone https://github.com/openwrt/luci.git -b openwrt-23.05 feeds/luci
+
+# 修复passwall依赖
+pushd package/custom/passwall
+git submodule update --init --recursive
+popd
 
 # 优化系统参数（合并重复配置）
 cat > package/base-files/files/etc/sysctl.conf << EOF
@@ -129,3 +138,16 @@ popd
 # 配置SmartDNS为默认DNS
 sed -i 's/option resolvfile/# option resolvfile/g' package/network/services/dnsmasq/files/dhcp.conf
 sed -i '/# option resolvfile/a\option server \"/#/127.0.0.1#5353\"' package/network/services/dnsmasq/files/dhcp.conf
+
+# 安装upx/host（用于nps压缩）
+pushd feeds/packages/utils/upx
+make package/compile V=s
+popd
+
+# 明确添加缺失的依赖到配置
+echo "CONFIG_PACKAGE_luci-app-samba4=y" >> .config
+echo "CONFIG_PACKAGE_pdnsd-alt=y" >> .config
+echo "CONFIG_PACKAGE_chinadns-ng=y" >> .config
+echo "CONFIG_PACKAGE_dns2socks=y" >> .config
+echo "CONFIG_PACKAGE_tcping=y" >> .config
+echo "CONFIG_PACKAGE_upx=y" >> .config
