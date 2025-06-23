@@ -134,6 +134,7 @@ jobs:
           fi
         fi
         
+        # 创建设备树（使用正确的sed语法）
         DEVICE_TREE="qcom,ipq5322-jd-be6500.dts"
         DTS_DIR="target/linux/$ARCH/dts"
         mkdir -p "$DTS_DIR"
@@ -144,20 +145,20 @@ jobs:
           # 创建空文件
           touch "$DTS_DIR/$DEVICE_TREE"
           
-          # 使用sed添加内容
-          sed -i '$a/dts-v1/;' "$DTS_DIR/$DEVICE_TREE"
+          # 使用sed追加内容
+          sed -i '$a\/dts-v1\/;' "$DTS_DIR/$DEVICE_TREE"
           sed -i '$a#include "qcom,ipq5322.dtsi"' "$DTS_DIR/$DEVICE_TREE"
           sed -i '$a' "$DTS_DIR/$DEVICE_TREE"
-          sed -i '$a/ {' "$DTS_DIR/$DEVICE_TREE"
-          sed -i '$a  model = "JD BE6500";' "$DTS_DIR/$DEVICE_TREE"
-          sed -i '$a  compatible = "qcom,ipq5322", "qcom,ipq5000";' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a\/ {' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a  model = \"JD BE6500\";' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a  compatible = \"qcom,ipq5322\", \"qcom,ipq5000\";' "$DTS_DIR/$DEVICE_TREE"
           sed -i '$a' "$DTS_DIR/$DEVICE_TREE"
           sed -i '$a  chosen {' "$DTS_DIR/$DEVICE_TREE"
-          sed -i '$a    bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a    bootargs = \"earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8\";' "$DTS_DIR/$DEVICE_TREE"
           sed -i '$a  };' "$DTS_DIR/$DEVICE_TREE"
           sed -i '$a' "$DTS_DIR/$DEVICE_TREE"
           sed -i '$a  memory@80000000 {' "$DTS_DIR/$DEVICE_TREE"
-          sed -i '$a    device_type = "memory";' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a    device_type = \"memory\";' "$DTS_DIR/$DEVICE_TREE"
           sed -i '$a    reg = <0x80000000 0x40000000>; /* 1GB */' "$DTS_DIR/$DEVICE_TREE"
           sed -i '$a  };' "$DTS_DIR/$DEVICE_TREE"
           sed -i '$a};' "$DTS_DIR/$DEVICE_TREE"
@@ -167,14 +168,14 @@ jobs:
           cat "$DTS_DIR/$DEVICE_TREE"
         fi
         
-        # 生成feeds.conf.default（使用多个sed命令）
+        # 生成feeds.conf.default（使用正确的sed语法）
         if [ ! -f "feeds.conf.default" ]; then
           echo "生成feeds配置文件..."
           
           # 创建空文件
           touch feeds.conf.default
           
-          # 使用sed添加内容
+          # 使用sed追加内容
           sed -i '$a src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/ipq807x/generic/packages' feeds.conf.default
           sed -i '$a src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/base' feeds.conf.default
           sed -i '$a src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/luci' feeds.conf.default
