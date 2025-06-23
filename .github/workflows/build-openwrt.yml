@@ -37,9 +37,6 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04                                 # 直接使用Ubuntu环境
-    # 移除容器配置
-    # container:
-    #   image: openwrt/sdk:23.05.0-x86-64
 
     steps:
     - name: 检查环境
@@ -56,7 +53,8 @@ jobs:
         sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
           gettext git java-propose-classpath libelf-dev libncurses5-dev \
           libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools \
-          python3-dev rsync subversion swig time unzip wget xmlto zlib1g-dev
+          python3-dev rsync subversion swig time unzip wget xmlto zlib1g-dev \
+          quilt autopoint libtool-bin gperf flex bison gettext-base asciidoc dos2unix
 
     - name: 配置Git凭证
       run: |
@@ -89,7 +87,7 @@ jobs:
       uses: actions/cache@v3
       with:
         path: ${{ env.CACHE_DIR }}
-        key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/dl/**') }}
+        key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/dl/**', 'feeds.conf.default') }}
         restore-keys: |
           ${{ runner.os }}-openwrt-dl-
 
@@ -105,7 +103,7 @@ jobs:
           echo "生成JD BE6500设备树..."
           touch "$DTS_DIR/$DEVICE_TREE"
           
-          # 使用echo替代cat << EOF
+          # 使用echo生成设备树
           echo "/dts-v1/;" >> "$DTS_DIR/$DEVICE_TREE"
           echo "#include \"qcom,ipq5332.dtsi\"" >> "$DTS_DIR/$DEVICE_TREE"
           echo "#include \"ipq807x.dtsi\"" >> "$DTS_DIR/$DEVICE_TREE"
@@ -149,8 +147,37 @@ jobs:
           echo "设备树已存在，跳过生成"
         fi
 
-        cat $FEEDS_CONFF
-
+    - name: 智能Feeds配置（去重+依赖修复）
+      run: |
+        cd $OPENWRT_PATH
+        # 备份原始Feeds配置
+        cp $FEEDS_CONF ${FEEDS_CONF}.bak
+        
+        # 1. 清理重复源（保留唯一实例）
+        UNIQUE_FEEDS=$(cat $FEEDS_CONF | grep -v '^#' | sort -u)
+        > $FEEDS_CONF
+        echo "$UNIQUE_FEEDS" >> $FEEDS_CONF
+        
+        # 2. 添加必要源（避免重复添加）
+        if ! grep -q "lienol" $FEEDS_CONF; then
+          echo "src-git lienol https://github.com/Lienol/openwrt-package" >> $FEEDS_CONF
+        fi
+        if ! grep -q "kenzo" $FEEDS_CONF; then
+          echo "src-git kenzo https://github.com/kenzok8/openwrt-packages" >> $FEEDS_CONF
+        fi
+        if ! grep -q "small" $FEEDS_CONF; then
+          echo "src-git small https://github.com/kenzok8/small" >> $FEEDS_CONF
+        fi
+        
+        # 3. 添加官方源（补充基础包）
+        echo "src-gz openwrt_core https://downloads.openwrt.org/releases/23.05.0/targets/$ARCH/$SUBARCH/packages" >> $FEEDS_CONF
+        echo "src-gz openwrt_base https://downloads.openwrt.org/releases/23.05.0/packages/$CPU_ARCH/base" >> $FEEDS_CONF
+        echo "src-gz openwrt_luci https://downloads.openwrt.org/releases/23.05.0/packages/$CPU_ARCH/luci" >> $FEEDS_CONF
+        echo "src-gz openwrt_packages https://downloads.openwrt.org/releases/23.05.0/packages/$CPU_ARCH/packages" >> $FEEDS_CONF
+        
+        # 4. 显示最终Feeds配置
+        echo "=== 最终Feeds配置 ==="
+        cat $FEEDS_CONF
 
     - name: 依赖强化安装（解决历史报错）
       run: |
@@ -185,7 +212,6 @@ jobs:
               git clone https://github.com/openwrt/luci.git package/custom/luci
             elif [ $pkg == "wsdd2" ]; then
               mkdir -p package/custom/wsdd2
-              # 使用正确的wsdd2仓库地址
               git clone https://github.com/small-5/wsdd2.git package/custom/wsdd2
             elif [ $pkg == "libpam" ]; then
               mkdir -p package/custom/packages
@@ -203,34 +229,33 @@ jobs:
           echo "✅ 所有依赖已安装"
         fi
 
-    - name: 自定义编译前修改 (Part 1)
-      run: |
-        if [ -f "$GITHUB_WORKSPACE/scripts/$DIY_P1_SH" ]; then
-          cd $OPENWRT_PATH
-          chmod +x $GITHUB_WORKSPACE/scripts/$DIY_P1_SH
-          echo "执行自定义脚本 $DIY_P1_SH..."
-          $GITHUB_WORKSPACE/scripts/$DIY_P1_SH
-        else
-          echo "⚠️ 未找到自定义脚本，使用默认配置"
-        fi
-
-    - name: 基础配置生成
+    - name: 基础配置生成（强制目标平台）
       run: |
         cd $OPENWRT_PATH
+        # 清空原有配置（避免默认配置干扰）
+        > .config
+        
         # 生成默认配置
         make defconfig
         
-        # 设置目标平台（IPQ5332适配）
-        sed -i 's|^# CONFIG_TARGET_ipq807x is not set|CONFIG_TARGET_ipq807x=y|' .config
-        sed -i 's|^# CONFIG_TARGET_ipq807x_generic is not set|CONFIG_TARGET_ipq807x_generic=y|' .config
-        sed -i 's|^# CONFIG_TARGET_IPQ807X_DEVICE_generic is not set|CONFIG_TARGET_IPQ807X_DEVICE_generic=y|' .config
+        # 强制设置IPQ807x目标平台（IPQ5332适配）
+        echo "CONFIG_TARGET_ipq807x=y" >> .config
+        echo "CONFIG_TARGET_ipq807x_generic=y" >> .config
+        echo "CONFIG_TARGET_IPQ807X_DEVICE_generic=y" >> .config
+        echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> .config  # 关键：指定设备树目标
+        echo "CONFIG_TARGET_KERNEL_PARTSIZE=16" >> .config         # 设置固件分区大小（MB）
         
         # 启用必要的基础包
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_PACKAGE_luci-ssl=y" >> .config
         echo "CONFIG_PACKAGE_kmod-ath11k-ct=y" >> .config       # Wi-Fi 7驱动
-        echo "CONFIG_PACKAGE_kmod-qca-ppe=y" >> .config        # PPE加速
+        echo "CONFIG_PACKAGE_kmod-qca-ppe=y" >> .config        # PPE加速模块
         echo "CONFIG_PACKAGE_fstools=y" >> .config             # 固件工具
+        echo "CONFIG_PACKAGE_partx=y" >> .config               # 分区工具
+        
+        # 显示当前配置（用于调试）
+        echo "=== 当前.config 目标配置 ==="
+        grep -E "CONFIG_TARGET|CONFIG_DEVICE" .config
 
     - name: 动态依赖配置（根据输入参数）
       run: |
@@ -254,17 +279,6 @@ jobs:
         # 显示关键配置
         echo "=== 关键配置 ==="
         grep -E "CONFIG_TARGET|CONFIG_PACKAGE_(samba|wsdd2|libpam)" .config
-
-    - name: 自定义配置修改 (Part 2)
-      run: |
-        if [ -f "$GITHUB_WORKSPACE/scripts/$DIY_P2_SH" ]; then
-          cd $OPENWRT_PATH
-          chmod +x $GITHUB_WORKSPACE/scripts/$DIY_P2_SH
-          echo "执行自定义配置脚本 $DIY_P2_SH..."
-          $GITHUB_WORKSPACE/scripts/$DIY_P2_SH
-        else
-          echo "⚠️ 未找到自定义脚本"
-        fi
 
     - name: 下载依赖包（带缓存）
       run: |
@@ -331,10 +345,26 @@ jobs:
           echo "✅ 并行编译成功"
         fi
 
-    - name: 固件完整性检查
+    - name: 固件完整性检查（精准定位目标目录）
       run: |
-        cd $OPENWRT_PATH/bin/targets/*/*
-        FIRMWARE_PATH=$(pwd)
+        cd $OPENWRT_PATH/bin/targets
+        # 动态定位ipq807x目标目录
+        IPQ807X_DIR=$(find . -type d -name "ipq807x" 2>/dev/null)
+        if [ -z "$IPQ807X_DIR" ]; then
+          echo "❌ 未找到ipq807x目标目录"
+          echo "可用目标目录:"
+          find . -type d -name "*" | grep targets
+          exit 1
+        fi
+        
+        FIRMWARE_PATH="$IPQ807X_DIR/generic"
+        if [ ! -d "$FIRMWARE_PATH" ]; then
+          echo "❌ 未找到ipq807x/generic 目录"
+          echo "可用目录:"
+          find "$IPQ807X_DIR" -type d
+          exit 1
+        fi
+        
         echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
         
         # 检查关键固件文件
@@ -377,6 +407,7 @@ jobs:
         echo "编译主机: $BUILD_HOST" >> version.info
         echo "Git 提交: $COMMIT_ID" >> version.info
         echo "Lienol 分支: $LIENOL_BRANCH" >> version.info
+        echo "目标平台: $ARCH/$SUBARCH" >> version.info
         
         # 输出版本变量
         echo "release_version=OpenWrt_${RELEASE_DATE}_${COMMIT_ID}" >> $GITHUB_ENV
