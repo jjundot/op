@@ -43,117 +43,137 @@ jobs:
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
-    - name: Enhanced feeds update with Chinese mirrors
+    - name: Multi-mirror feeds update with retry
       run: |
         cd $OPENWRT_PATH
         
-        # 网络诊断（检查所有关键源）
-        echo "Network diagnosis:"
-        ping -c 3 mirrors.tuna.tsinghua.edu.cn
-        ping -c 3 gitee.com
-        ping -c 3 github.com
+        # 定义镜像源列表
+        MIRRORS=(
+          "https://mirrors.tuna.tsinghua.edu.cn/openwrt"
+          "https://mirrors.ustc.edu.cn/openwrt"
+          "https://openwrt.cc"
+          "https://downloads.openwrt.org"  # 保留官方源作为备选
+        )
         
-        # 检查关键域名的curl响应
-        echo "Checking domain availability:"
-        curl -sI https://mirrors.tuna.tsinghua.edu.cn/openwrt || echo "TUNA mirror is unreachable"
-        curl -sI https://gitee.com/kenzok8/openwrt-packages || echo "Kenzo's repo is unreachable"
-        curl -sI https://github.com/openwrt/openwrt || echo "OpenWrt GitHub repo is unreachable"
+        # 网络诊断（尝试所有镜像源）
+        echo "Network diagnosis:"
+        for mirror in "${MIRRORS[@]}"; do
+          domain=$(echo $mirror | awk -F/ '{print $3}')
+          echo "Checking $domain..."
+          ping -c 3 $domain >/dev/null 2>&1
+          PING_STATUS=$?
+          
+          if [ $PING_STATUS -eq 0 ]; then
+            echo "✅ $domain is reachable via ICMP"
+            REACHABLE_MIRRORS+=("$mirror")
+          else
+            echo "❌ $domain is unreachable via ICMP, but continuing..."
+            # 即使ping不通，也将其添加到备选列表，因为HTTP可能仍可用
+            REACHABLE_MIRRORS+=("$mirror")
+          fi
+        done
+        
+        # 如果没有可达的镜像，使用第一个镜像继续尝试
+        if [ ${#REACHABLE_MIRRORS[@]} -eq 0 ]; then
+          echo "No mirrors are reachable via ICMP, using the first mirror as fallback"
+          REACHABLE_MIRRORS=("${MIRRORS[0]}")
+        fi
         
         # 获取当前分支名
         BRANCH=$(git branch --show-current || echo "$REPO_BRANCH")
         ARCH=qca-ipq807x/generic
         CPU_ARCH=aarch64_cortex-a53
         
-        # 使用清华大学镜像源
-        if [[ $BRANCH == "master" || $BRANCH == "dev" ]]; then
-          BASE_URL="https://mirrors.tuna.tsinghua.edu.cn/openwrt/snapshots"
-        else
-          CLEAN_BRANCH=${BRANCH#v}
-          BASE_URL="https://mirrors.tuna.tsinghua.edu.cn/openwrt/releases/$CLEAN_BRANCH"
-        fi
-        
-        # 写入新的feeds.conf.default
-        cat > feeds.conf.default << EOF
-        src-gz openwrt_core $BASE_URL/targets/$ARCH/packages
-        src-gz openwrt_base $BASE_URL/packages/$CPU_ARCH/base
-        src-gz openwrt_luci $BASE_URL/packages/$CPU_ARCH/luci
-        src-gz openwrt_packages $BASE_URL/packages/$CPU_ARCH/packages
-        src-gz openwrt_routing $BASE_URL/packages/$CPU_ARCH/routing
-        src-gz openwrt_telephony $BASE_URL/packages/$CPU_ARCH/telephony
-        EOF
-        
-        # 使用Gitee镜像替代GitHub源
-        echo "src-git kenzo https://gitee.com/kenzok8/openwrt-packages.git" >> feeds.conf.default
-        echo "src-git small https://gitee.com/kenzok8/small.git" >> feeds.conf.default
-        
-        # 打印生成的配置
-        echo "Generated feeds.conf.default:"
-        cat feeds.conf.default
-        
-        # 创建详细的日志文件
-        LOG_FILE="feeds_update.log"
-        touch $LOG_FILE
-        
-        # 清理旧的feeds缓存
-        rm -rf feeds/*
-        
-        # 分步更新和安装核心feeds
-        echo "Updating core feeds..."
-        for i in {1..3}; do
-          echo "Attempt $i/3 to update core feeds..."
-          ./scripts/feeds update base packages luci routing telephony 2>&1 | tee -a $LOG_FILE
-          UPDATE_STATUS=${PIPESTATUS[0]}
+        # 尝试所有可用镜像，直到找到一个可以工作的
+        for mirror in "${REACHABLE_MIRRORS[@]}"; do
+          echo "Trying mirror: $mirror"
           
-          if [ $UPDATE_STATUS -eq 0 ]; then
-            echo "Core feeds updated successfully"
-            break
+          # 根据分支生成源URL
+          if [[ $BRANCH == "master" || $BRANCH == "dev" ]]; then
+            BASE_URL="$mirror/snapshots"
           else
-            echo "Core feeds update failed, retrying..."
-            cat $LOG_FILE | tail -n 20  # 打印最后20行日志
+            CLEAN_BRANCH=${BRANCH#v}
+            BASE_URL="$mirror/releases/$CLEAN_BRANCH"
           fi
           
-          if [ $i -eq 3 ]; then
-            echo "Core feeds update failed after 3 retries!"
-            echo "Full error log:"
-            cat $LOG_FILE
-            exit 1
-          fi
-          sleep 10
+          # 写入新的feeds.conf.default
+          cat > feeds.conf.default << EOF
+          src-gz openwrt_core $BASE_URL/targets/$ARCH/packages
+          src-gz openwrt_base $BASE_URL/packages/$CPU_ARCH/base
+          src-gz openwrt_luci $BASE_URL/packages/$CPU_ARCH/luci
+          src-gz openwrt_packages $BASE_URL/packages/$CPU_ARCH/packages
+          src-gz openwrt_routing $BASE_URL/packages/$CPU_ARCH/routing
+          src-gz openwrt_telephony $BASE_URL/packages/$CPU_ARCH/telephony
+          EOF
+          
+          # 添加国内镜像源
+          echo "src-git kenzo https://gitee.com/kenzok8/openwrt-packages.git" >> feeds.conf.default
+          echo "src-git small https://gitee.com/kenzok8/small.git" >> feeds.conf.default
+          
+          # 打印生成的配置
+          echo "Generated feeds.conf.default:"
+          cat feeds.conf.default
+          
+          # 创建详细的日志文件
+          LOG_FILE="feeds_update_${mirror//\//_}.log"
+          touch $LOG_FILE
+          
+          # 清理旧的feeds缓存
+          rm -rf feeds/*
+          
+          # 尝试更新feeds
+          echo "Attempting to update feeds using $mirror..."
+          for i in {1..3}; do
+            echo "Attempt $i/3 to update feeds..."
+            ./scripts/feeds update -a 2>&1 | tee -a $LOG_FILE
+            UPDATE_STATUS=${PIPESTATUS[0]}
+            
+            if [ $UPDATE_STATUS -eq 0 ]; then
+              echo "Feeds updated successfully using $mirror"
+              
+              # 尝试安装feeds
+              echo "Installing packages..."
+              ./scripts/feeds install -a 2>&1 | tee -a $LOG_FILE
+              INSTALL_STATUS=${PIPESTATUS[0]}
+              
+              if [ $INSTALL_STATUS -eq 0 ]; then
+                echo "Packages installed successfully"
+                MIRROR_WORKED=true
+                break 2  # 跳出两层循环
+              else
+                echo "Package installation failed using $mirror"
+              fi
+            else
+              echo "Feeds update failed using $mirror, retrying..."
+            fi
+            
+            if [ $i -eq 3 ]; then
+              echo "Feeds update failed after 3 retries using $mirror"
+              echo "Full error log:"
+              cat $LOG_FILE
+            fi
+            sleep 10
+          done
         done
         
-        # 安装核心feeds包
-        echo "Installing core packages..."
-        ./scripts/feeds install -a base packages luci routing telephony 2>&1 | tee -a $LOG_FILE
-        if [ $? -ne 0 ]; then
-          echo "Failed to install core packages!"
-          echo "Full error log:"
-          cat $LOG_FILE
+        # 检查是否有镜像成功工作
+        if [ "$MIRROR_WORKED" != "true" ]; then
+          echo "All mirrors failed to update feeds!"
           exit 1
         fi
         
-        # 更新自定义feeds
-        echo "Updating custom feeds..."
-        for i in {1..3}; do
-          echo "Attempt $i/3 to update custom feeds..."
-          ./scripts/feeds update kenzo small 2>&1 | tee -a $LOG_FILE
-          UPDATE_STATUS=${PIPESTATUS[0]}
-          
-          if [ $UPDATE_STATUS -eq 0 ]; then
-            echo "Custom feeds updated successfully"
-            break
-          else
-            echo "Custom feeds update failed, retrying..."
-            cat $LOG_FILE | tail -n 20
-          fi
-          
-          if [ $i -eq 3 ]; then
-            echo "Custom feeds update failed after 3 retries!"
-            echo "Full error log:"
-            cat $LOG_FILE
-            exit 1
-          fi
-          sleep 10
-        done
+        # 验证所有包是否正确安装
+        echo "Verifying package installation..."
+        PACKAGES=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
+        echo "Total available packages: $PACKAGES"
+        
+        if [ $PACKAGES -lt 100 ]; then
+          echo "Warning: Only $PACKAGES packages found, possible installation issue!"
+          ./scripts/feeds list | grep -vE '^#|^$' | sort
+          exit 1
+        else
+          echo "Package installation verified successfully"
+        fi
         
         # 安装自定义feeds包
         echo "Installing custom packages..."
