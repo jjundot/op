@@ -1,4 +1,4 @@
-name: Build OpenWrt for JD BE6500
+name: Build OpenWrt for JD BE6500 (IPQ5332)
 
 on:
   workflow_dispatch:  # 手动触发
@@ -6,21 +6,21 @@ on:
     types: published  # 发布Release时触发
 
 env:
-  LIENOL_REPO: https://github.com/Lienol/openwrt          # Lienol主仓库URL
-  LIENOL_TARGET_REPO: https://github.com/Lienol/openwrt-target-ipq807x  # IPQ807x目标仓库
-  LIENOL_BRANCH: 23.05                                  # Lienol默认分支
-  ARCH: ipq807x                                          # 目标架构
-  SUBARCH: generic                                       # 子架构
+  LIENOL_REPO: https://github.com/Lienol/openwrt          # Lienol主仓库
+  LIENOL_TARGET_REPO: https://github.com/Lienol/openwrt-target-ipq5000  # IPQ5000目标仓库
+  LIENOL_BRANCH: 23.05                                  # 使用23.05分支
+  ARCH: ipq5000                                          # 修正为IPQ5000架构
+  SUBARCH: ipq53xx                                       # 子架构设为ipq53xx
   CPU_ARCH: aarch64_cortex-a53                           # CPU架构
-  FEEDS_CONF: feeds.conf.default                         # Feeds配置文件
-  CONFIG_FILE: .config                                   # 编译配置文件
+  FEEDS_CONF: feeds.conf.default                         # Feeds配置
+  CONFIG_FILE: .config                                   # 编译配置
   DIY_P1_SH: diy-part1.sh                                # 自定义脚本1
   DIY_P2_SH: diy-part2.sh                                # 自定义脚本2
   UPLOAD_BIN_DIR: false                                  # 不上传bin目录
   UPLOAD_FIRMWARE: true                                  # 上传固件
   UPLOAD_RELEASE: true                                   # 发布到Release
   TZ: Asia/Shanghai                                      # 时区
-  GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}                  # 自定义Token名称
+  GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}                  # GitHub Token
 
 jobs:
   build:
@@ -30,7 +30,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
       with:
-        path: scripts                                      # 自定义检出路径
+        path: scripts                                      # 检出路径
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -45,30 +45,26 @@ jobs:
 
     - name: Configure Git Credentials
       run: |
-        # 配置Git凭据存储，解决URL注入问题
         git config --global credential.helper store
         echo "https://${GITHUB_TOKEN}:@github.com" > ~/.git-credentials
-        # 验证配置
         echo "Git credential helper: $(git config --global --get credential.helper)"
         echo "Stored credentials: $(cat ~/.git-credentials || echo 'No credentials stored')"
 
     - name: Clone Lienol's OpenWrt repo
       run: |
-        # 清理旧目录
         rm -rf openwrt
         
-        # 检查分支是否存在
-        echo "Checking if branch $LIENOL_BRANCH exists..."
+        # 检查分支有效性
+        echo "Checking branch $LIENOL_BRANCH..."
         if ! git ls-remote --heads $LIENOL_REPO $LIENOL_BRANCH | grep -q $LIENOL_BRANCH; then
-          echo "Branch $LIENOL_BRANCH does not exist in $LIENOL_REPO"
-          echo "Available branches:"
+          echo "Branch not found. Available branches:"
           git ls-remote --heads $LIENOL_REPO | awk '{print $2}'
           exit 1
         fi
         
-        # 克隆仓库
+        # 三次克隆重试
         for i in {1..3}; do
-          echo "Attempt $i/3 to clone Lienol's OpenWrt repo..."
+          echo "Attempt $i/3 to clone repo..."
           git clone --depth=1 $LIENOL_REPO -b $LIENOL_BRANCH openwrt
           if [ $? -eq 0 ]; then
             echo "✅ 仓库克隆成功"
@@ -78,49 +74,35 @@ jobs:
           sleep 10
         done
         
-        # 验证克隆结果
         if [ ! -d "openwrt" ]; then
-          echo "💥 三次克隆均失败，退出构建"
+          echo "💥 三次克隆失败，退出"
           exit 1
         fi
         
         cd openwrt
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
 
-    - name: Prepare IPQ5322 device tree
+    - name: Prepare IPQ5332 device tree
       run: |
         cd $OPENWRT_PATH
         
-        # 从主仓库稀疏克隆IPQ807x目标支持
+        # 处理IPQ5000目标支持
         if [ ! -d "target/linux/$ARCH" ]; then
-          echo "Cloning IPQ807x target support from main repo using sparse checkout..."
+          echo "Cloning IPQ5000 target support..."
           for i in {1..3}; do
-            git clone --depth=1 $LIENOL_REPO -b $LIENOL_BRANCH --single-branch --no-checkout temp_repo
+            git clone --depth=1 $LIENOL_TARGET_REPO -b $LIENOL_BRANCH temp_repo
             if [ $? -ne 0 ]; then
-              echo "❌ 克隆主仓库失败，重试中..."
+              echo "❌ 克隆目标仓库失败，重试中..."
               rm -rf temp_repo
               sleep 10
               continue
             fi
             
-            cd temp_repo
-            git sparse-checkout init --cone
-            git sparse-checkout set "target/linux/$ARCH"
-            git checkout
-            if [ $? -ne 0 ]; then
-              echo "❌ 稀疏检出失败，重试中..."
-              cd ..
-              rm -rf temp_repo
-              sleep 10
-              continue
-            fi
-            
-            mv target/linux/$ARCH ../target/linux/
-            cd ..
+            mv temp_repo/target/linux/$ARCH ../target/linux/
             rm -rf temp_repo
             
             if [ -d "target/linux/$ARCH" ]; then
-              echo "✅ IPQ807x target support cloned successfully"
+              echo "✅ IPQ5000目标支持克隆成功"
               break
             fi
             
@@ -129,29 +111,27 @@ jobs:
           done
           
           if [ ! -d "target/linux/$ARCH" ]; then
-            echo "💥 无法获取IPQ807x目标支持，退出构建"
+            echo "💥 无法获取IPQ5000目标支持，退出"
             exit 1
           fi
         fi
         
-        # 创建设备树（使用正确的sed语法）
-               DEVICE_TREE="qcom,ipq5322-jd-be6500.dts"
+        # 创建设备树（IPQ5332专用）
+        DEVICE_TREE="qcom,ipq5332-jd-be6500.dts"
         DTS_DIR="target/linux/$ARCH/dts"
         mkdir -p "$DTS_DIR"
         
         if [ ! -f "$DTS_DIR/$DEVICE_TREE" ]; then
           echo "生成JD BE6500设备树..."
-          
-          # 清空并创建文件
           > "$DTS_DIR/$DEVICE_TREE"
           
-          # 使用echo >>逐行添加内容
+          # 设备树内容（IPQ5332专用）
           echo "/dts-v1/;" >> "$DTS_DIR/$DEVICE_TREE"
-          echo "#include \"qcom,ipq5322.dtsi\"" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "#include \"qcom,ipq5332.dtsi\"" >> "$DTS_DIR/$DEVICE_TREE"
           echo "" >> "$DTS_DIR/$DEVICE_TREE"
           echo "/ {" >> "$DTS_DIR/$DEVICE_TREE"
           echo "  model = \"JD BE6500\";" >> "$DTS_DIR/$DEVICE_TREE"
-          echo "  compatible = \"qcom,ipq5322\", \"qcom,ipq5000\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  compatible = \"qcom,ipq5332\", \"qcom,ipq5000\";" >> "$DTS_DIR/$DEVICE_TREE"
           echo "" >> "$DTS_DIR/$DEVICE_TREE"
           echo "  chosen {" >> "$DTS_DIR/$DEVICE_TREE"
           echo "    bootargs = \"earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8\";" >> "$DTS_DIR/$DEVICE_TREE"
@@ -163,31 +143,26 @@ jobs:
           echo "  };" >> "$DTS_DIR/$DEVICE_TREE"
           echo "};" >> "$DTS_DIR/$DEVICE_TREE"
           
-          # 验证设备树内容
           echo "设备树内容:"
           cat "$DTS_DIR/$DEVICE_TREE"
         fi
         
-        # 生成feeds.conf.default（使用echo >>）
+        # 生成feeds.conf.default（IPQ5332适配源）
         if [ ! -f "feeds.conf.default" ]; then
           echo "生成feeds配置文件..."
-          
-          # 清空并创建文件
           > feeds.conf.default
           
-          # 使用echo >>逐行添加内容
-          echo "src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/ipq807x/generic/packages" >> feeds.conf.default
+          echo "src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/ipq5000/ipq53xx/packages" >> feeds.conf.default
           echo "src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/base" >> feeds.conf.default
           echo "src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/luci" >> feeds.conf.default
           echo "src-gz openwrt_packages https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/packages" >> feeds.conf.default
           echo "src-git lienol https://github.com/Lienol/openwrt-package" >> feeds.conf.default
           
-          # 验证配置文件内容
-          echo "feeds配置文件内容:"
+          echo "feeds配置内容:"
           cat feeds.conf.default
         fi
         
-        # 更新Feeds（带详细日志）
+        # 更新Feeds
         echo "开始更新feeds..."
         rm -rf feeds/*
         for i in {1..5}; do
@@ -199,28 +174,28 @@ jobs:
             if [ $? -eq 0 ]; then
               PACKAGE_COUNT=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
               echo "✅ 找到 $PACKAGE_COUNT 个软件包"
-              # 写入目标配置
-              echo "CONFIG_TARGET_ipq807x=y" >> .config
-              echo "CONFIG_TARGET_ipq807x_generic=y" >> .config
-              echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> .config
+              
+              # 写入目标配置（IPQ5332专用）
+              echo "CONFIG_TARGET_ipq5000=y" >> .config
+              echo "CONFIG_TARGET_ipq5000_generic=y" >> .config
+              echo "CONFIG_TARGET_IPQ5000_DEVICE_jd-be6500=y" >> .config
               break
             else
-              echo "❌ Feeds安装失败，日志如下："
+              echo "❌ Feeds安装失败"
               cat feeds_install.log
             fi
           else
-            echo "❌ Feeds更新失败，日志如下："
+            echo "❌ Feeds更新失败"
             cat feeds_update.log
           fi
           
-          echo "清理并尝试重新更新..."
+          echo "清理并重试..."
           rm -rf feeds/*
           sleep 15
         done
         
-        # 检查Feeds更新结果
         if [ ! -d "feeds" ]; then
-          echo "💥 Feeds更新失败，退出构建"
+          echo "💥 Feeds更新失败，退出"
           cat feeds_update.log
           exit 1
         fi
@@ -233,28 +208,26 @@ jobs:
           echo "执行自定义脚本 $DIY_P1_SH..."
           $GITHUB_WORKSPACE/scripts/$DIY_P1_SH
         else
-          echo "⚠️ 未找到自定义脚本 $DIY_P1_SH，使用默认配置"
+          echo "⚠️ 未找到自定义脚本，使用默认配置"
         fi
+
     - name: Set terminal environment
       run: |
         echo "TERM=dumb" >> $GITHUB_ENV
         echo "无人交互终端环境已设置"
 
-        
     - name: Fix missing dependencies
       run: |
         cd $OPENWRT_PATH
-        # 移除有依赖问题的软件包（可选）
+        # 移除可能冲突的软件包
         sed -i '/CONFIG_PACKAGE_luci-app-samba/d' .config
         sed -i '/CONFIG_PACKAGE_luci-app-mwan3helper/d' .config
         sed -i '/CONFIG_PACKAGE_luci-app-passwall/d' .config
-        sed -i '/CONFIG_PACKAGE_nps/d' .config
         
-        # 或者添加缺失的依赖（可选）
-        # echo "CONFIG_PACKAGE_chinadns-ng=y" >> .config
-        # echo "CONFIG_PACKAGE_dns2socks=y" >> .config
-        # echo "CONFIG_PACKAGE_tcping=y" >> .config
-        # echo "CONFIG_PACKAGE_pdnsd-alt=y" >> .config
+        # 添加IPQ5332必要驱动
+        echo "CONFIG_PACKAGE_kmod-ath11k-ct=y" >> .config       # Wi-Fi 7驱动
+        echo "CONFIG_PACKAGE_kmod-qca-ppe=y" >> .config        # PPE加速模块
+        echo "CONFIG_PACKAGE_kmod-ledtrig-netdev=y" >> .config # 网络指示灯驱动
 
     - name: Customize configuration (Part 2)
       run: |
@@ -264,7 +237,7 @@ jobs:
           echo "执行自定义配置脚本 $DIY_P2_SH..."
           $GITHUB_WORKSPACE/scripts/$DIY_P2_SH
         else
-          echo "⚠️ 未找到自定义脚本 $DIY_P2_SH"
+          echo "⚠️ 未找到自定义脚本"
         fi
 
     - name: Download package dependencies
@@ -275,44 +248,35 @@ jobs:
         DOWNLOAD_STATUS=$?
         
         # 清理无效下载
-        echo "清理无效下载文件..."
-        find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
         
-        # 检查下载状态
         if [ $DOWNLOAD_STATUS -ne 0 ]; then
-          echo "⚠️ 下载过程中可能存在错误，但继续构建..."
+          echo "⚠️ 下载可能存在错误，继续构建..."
         else
-          echo "✅ 包依赖下载完成"
+          echo "✅ 依赖下载完成"
         fi
 
     - name: Build firmware
       run: |
         cd $OPENWRT_PATH
-        echo "开始编译固件..."
+        echo "开始编译固件... (IPQ5332专用)"
         echo "使用 $(nproc) 线程编译..."
         
-        # 尝试并行编译，失败则单线程重试
+        # 并行编译，失败则单线程重试
         make -j$(nproc) V=s || make -j1 V=s
         
-        BUILD_STATUS=$?
-        if [ $BUILD_STATUS -ne 0 ]; then
+        if [ $? -ne 0 ]; then
           echo "❌ 编译失败"
-          
-          # 收集错误日志
-          echo "收集编译错误日志..."
-          mkdir -p error_logs
           find . -name "*.log" -exec cp {} error_logs/ \;
           tar -czf error_logs.tar.gz error_logs
-          
-          exit $BUILD_STATUS
+          exit 1
         else
           echo "✅ 固件编译成功"
         fi
 
     - name: Check space usage
       run: |
-        echo "检查磁盘空间使用情况:"
+        echo "磁盘空间使用:"
         df -h
         echo "OpenWrt bin目录大小:"
         du -sh $OPENWRT_PATH/bin
@@ -325,20 +289,13 @@ jobs:
         echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
         echo "::set-output name=status::success"
         
-        # 检查是否有固件文件
         if [ -n "$(ls $FIRMWARE_PATH/*.bin 2>/dev/null)" ]; then
           echo "FILES_AVAILABLE=true" >> $GITHUB_ENV
-          echo "✅ 找到固件文件"
-          
-          # 列出所有固件文件
-          echo "固件文件列表:"
+          echo "✅ 找到固件文件:"
           ls -lh $FIRMWARE_PATH/*.bin
         else
           echo "FILES_AVAILABLE=false" >> $GITHUB_ENV
-          echo "❌ 未找到固件文件"
-          
-          # 收集可用文件
-          echo "可用文件列表:"
+          echo "❌ 未找到固件文件，可用文件:"
           ls -lh $FIRMWARE_PATH/* || true
         fi
 
@@ -358,8 +315,8 @@ jobs:
         files: ${{ env.FIRMWARE_PATH }}/*
         tag_name: ${{ github.ref_name }}
         body: |
-          OpenWrt firmware for JD BE6500
+          OpenWrt firmware for JD BE6500 (IPQ5332)
           Built from commit ${{ github.sha }}
           Date: $(date +%Y-%m-%d)
       env:
-        GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}    
+        GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}
