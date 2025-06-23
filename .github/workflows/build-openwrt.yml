@@ -76,7 +76,6 @@ jobs:
           echo "Adding JD BE6500 device tree..."
           cat > "target/linux/$ARCH/dts/$DEVICE_TREE" << 'EOF'  # 使用单引号防止变量扩展
 /dts-v1/;
-#include "qcom,ipq5322.dtsi"
 
 / {
   model = "JD BE6500";
