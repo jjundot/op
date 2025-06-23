@@ -43,7 +43,7 @@ jobs:
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
-    - name: IPQ5322-specific feeds update
+    - name: IPQ5322-specific feeds update (bash compatible)
       run: |
         cd $OPENWRT_PATH
         
@@ -74,27 +74,32 @@ jobs:
         # 3. 检测官方架构路径（优先）
         VALID_ARCH=""
         VALID_SUBARCH=""
+        ARCH_FOUND=false
+        
         for arch in "${OFFICIAL_ARCHES[@]}"; do
+          if [ "$ARCH_FOUND" = true ]; then break; fi
           for subarch in "nand" "smp" "generic"; do
             TARGET_PATH="$BASE_URL/targets/$arch/$subarch/packages"
             if curl -s -o /dev/null -w "%{http_code}" "$TARGET_PATH" 2>/dev/null | grep -q "200"; then
               VALID_ARCH=$arch
               VALID_SUBARCH=$subarch
+              ARCH_FOUND=true
               echo "Found official target path: $TARGET_PATH"
-              goto FOUND_ARCH
+              break 2
             fi
           done
         done
         
         # 4. 检测社区架构路径（备用）
-        FOUND_ARCH:
-        if [ -z "$VALID_ARCH" ]; then
+        if [ "$ARCH_FOUND" = false ]; then
           for arch in "${COMMUNITY_ARCHES[@]}"; do
+            if [ "$ARCH_FOUND" = true ]; then break; fi
             for subarch in "nand" "smp" "generic"; do
               TARGET_PATH="https://mirrors.cloud.tencent.com/openwrt/$VALID_BRANCH/targets/$arch/$subarch/packages"
               if curl -s -o /dev/null -w "%{http_code}" "$TARGET_PATH" 2>/dev/null | grep -q "200"; then
                 VALID_ARCH=$arch
                 VALID_SUBARCH=$subarch
+                ARCH_FOUND=true
                 echo "Found community target path: $TARGET_PATH"
                 break 2
               fi
@@ -103,7 +108,7 @@ jobs:
         fi
         
         # 5. 若仍失败，输出可用架构列表
-        if [ -z "$VALID_ARCH" ]; then
+        if [ "$ARCH_FOUND" = false ]; then
           echo "Error: No valid path found for IPQ5322!"
           echo "Available targets in $BASE_URL:"
           curl -s "$BASE_URL/targets/" | grep -o '<a href="[^"]*">' | grep -o '[^"]*/' | sort -u
