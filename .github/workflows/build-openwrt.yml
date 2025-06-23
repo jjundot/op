@@ -43,11 +43,13 @@ jobs:
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
+
+
     - name: Lienol community branch build for IPQ5322
       run: |
         cd $OPENWRT_PATH
         
-        # 切换到Lienol社区分支（对IPQ5322支持更好）
+        # 切换到Lienol社区分支
         echo "Cloning Lienol's OpenWrt branch for IPQ5322 support..."
         git remote set-url origin https://github.com/Lienol/openwrt.git
         git fetch origin master
@@ -62,6 +64,7 @@ jobs:
         BASE_URL="https://github.com/Lienol/openwrt/raw/master"
         TARGET_PATH="$BASE_URL/target/linux/$ARCH"
         
+        # 确保IPQ807x架构目录存在
         if [ ! -d "target/linux/$ARCH" ]; then
           echo "Cloning IPQ807x target support..."
           git clone https://github.com/Lienol/openwrt-target-ipq807x target/linux/$ARCH
@@ -71,7 +74,7 @@ jobs:
         DEVICE_TREE="qcom,ipq5322-jd-be6500.dts"
         if [ ! -f "target/linux/$ARCH/dts/$DEVICE_TREE" ]; then
           echo "Adding JD BE6500 device tree..."
-          cat > "target/linux/$ARCH/dts/$DEVICE_TREE" << 'EOF'  # 单引号防止变量扩展
+          cat > "target/linux/$ARCH/dts/$DEVICE_TREE" << 'EOF'  # 使用单引号防止变量扩展
 /dts-v1/;
 #include "qcom,ipq5322.dtsi"
 
@@ -91,8 +94,8 @@ jobs:
 EOF
         fi
         
-        # 生成feeds.conf.default（社区源）
-        cat > feeds.conf.default << EOF
+        # 生成feeds.conf.default（移除多余缩进）
+        cat > feeds.conf.default << 'EOF'
 src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/$ARCH/$SUBARCH/packages
 src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/$CPU_ARCH/base
 src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/$CPU_ARCH/luci
@@ -131,6 +134,9 @@ EOF
         echo "Feeds update failed after 5 attempts!"
         cat feeds.log
         exit 1
+
+
+        
     - name: Customize feeds (Part 1)
       run: |
         if [ -f "$GITHUB_WORKSPACE/scripts/$DIY_P1_SH" ]; then
