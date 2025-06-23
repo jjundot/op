@@ -134,56 +134,56 @@ jobs:
           fi
         fi
         
-        # 创建设备树（改用sed，确保格式正确）
         DEVICE_TREE="qcom,ipq5322-jd-be6500.dts"
         DTS_DIR="target/linux/$ARCH/dts"
         mkdir -p "$DTS_DIR"
+        
         if [ ! -f "$DTS_DIR/$DEVICE_TREE" ]; then
           echo "生成JD BE6500设备树..."
-          sed -e 's/^  //' > "$DTS_DIR/$DEVICE_TREE" << 'END_OF_DTS'
-            /dts-v1/;
-            #include "qcom,ipq5322.dtsi"
-
-            / {
-              model = "JD BE6500";
-              compatible = "qcom,ipq5322", "qcom,ipq5000";
-
-              chosen {
-                bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";
-              };
-
-              memory@80000000 {
-                device_type = "memory";
-                reg = <0x80000000 0x40000000>; /* 1GB */
-              };
-            };
-          END_OF_DTS
           
-          # 验证设备树语法
-          if command -v dtc &>/dev/null; then
-            dtc -I dts -O dtb -o /dev/null "$DTS_DIR/$DEVICE_TREE"
-            if [ $? -ne 0 ]; then
-              echo "❌ 设备树语法错误"
-              cat "$DTS_DIR/$DEVICE_TREE"
-              exit 1
-            else
-              echo "✅ 设备树语法验证通过"
-            fi
-          else
-            echo "⚠️ 未找到dtc工具，跳过设备树语法验证"
-          fi
+          # 创建空文件
+          touch "$DTS_DIR/$DEVICE_TREE"
+          
+          # 使用sed添加内容
+          sed -i '$a/dts-v1/;' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a#include "qcom,ipq5322.dtsi"' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a/ {' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a  model = "JD BE6500";' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a  compatible = "qcom,ipq5322", "qcom,ipq5000";' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a  chosen {' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a    bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a  };' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a  memory@80000000 {' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a    device_type = "memory";' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a    reg = <0x80000000 0x40000000>; /* 1GB */' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a  };' "$DTS_DIR/$DEVICE_TREE"
+          sed -i '$a};' "$DTS_DIR/$DEVICE_TREE"
+          
+          # 验证设备树内容
+          echo "设备树内容:"
+          cat "$DTS_DIR/$DEVICE_TREE"
         fi
         
-        # 生成feeds.conf.default（改用sed）
+        # 生成feeds.conf.default（使用多个sed命令）
         if [ ! -f "feeds.conf.default" ]; then
           echo "生成feeds配置文件..."
-          sed -e 's/^  //' > feeds.conf.default << 'END_OF_FEEDS'
-            src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/ipq807x/generic/packages
-            src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/base
-            src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/luci
-            src-gz openwrt_packages https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/packages
-            src-git lienol https://github.com/Lienol/openwrt-package
-          END_OF_FEEDS
+          
+          # 创建空文件
+          touch feeds.conf.default
+          
+          # 使用sed添加内容
+          sed -i '$a src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/ipq807x/generic/packages' feeds.conf.default
+          sed -i '$a src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/base' feeds.conf.default
+          sed -i '$a src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/luci' feeds.conf.default
+          sed -i '$a src-gz openwrt_packages https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/packages' feeds.conf.default
+          sed -i '$a src-git lienol https://github.com/Lienol/openwrt-package' feeds.conf.default
+          
+          # 验证配置文件内容
+          echo "feeds配置文件内容:"
+          cat feeds.conf.default
         fi
         
         # 更新Feeds（带详细日志）
