@@ -43,45 +43,56 @@ jobs:
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
-    - name: Minimal official feeds update
+    - name: Minimal official feeds update with path validation
       run: |
         cd $OPENWRT_PATH
         
-        # 强制使用OpenWrt官方源（明确指定分支和架构）
+        # 强制使用OpenWrt官方源（明确指定分支和架构路径）
         BRANCH=$(git branch --show-current || echo "master")
         ARCH=qca-ipq807x/generic  # JD BE6500架构
         CPU_ARCH=aarch64_cortex-a53  # IPQ5322处理器架构
         
-        # 根据分支设置源URL（明确版本路径）
+        # 根据分支设置源URL（带版本路径验证）
         if [[ $BRANCH == "master" || $BRANCH == "dev" ]]; then
           BASE_URL="https://downloads.openwrt.org/snapshots"
+          VERSION_PATH="snapshots"
         else
           CLEAN_BRANCH=${BRANCH#v}
           BASE_URL="https://downloads.openwrt.org/releases/$CLEAN_BRANCH.0"
+          VERSION_PATH="$CLEAN_BRANCH.0"
         fi
         
-        # 写入极简feeds.conf.default（仅官方核心源）
+        # 验证源路径是否存在（关键步骤）
+        echo "Validating source path: $BASE_URL"
+        curl -s -o /dev/null -w "%{http_code}" $BASE_URL/targets/$ARCH/packages
+        PATH_STATUS=$?
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" $BASE_URL/targets/$ARCH/packages)
+        
+        if [ $PATH_STATUS -ne 0 ] || [ "$HTTP_CODE" != "200" ]; then
+          echo "Error: Source path $BASE_URL/targets/$ARCH/packages does not exist (HTTP code: $HTTP_CODE)"
+          exit 1
+        fi
+        
+        # 写入极简feeds.conf.default（仅核心源）
         cat > feeds.conf.default << EOF
         src-gz openwrt_core $BASE_URL/targets/$ARCH/packages
         src-gz openwrt_base $BASE_URL/packages/$CPU_ARCH/base
         src-gz openwrt_luci $BASE_URL/packages/$CPU_ARCH/luci
         src-gz openwrt_packages $BASE_URL/packages/$CPU_ARCH/packages
-        # 暂时注释路由和电话相关源（避免冲突）
-        # src-gz openwrt_routing $BASE_URL/packages/$CPU_ARCH/routing
-        # src-gz openwrt_telephony $BASE_URL/packages/$CPU_ARCH/telephony
         EOF
         
-        # 打印配置（便于验证）
+        # 打印配置并验证
         echo "Generated minimal feeds.conf.default:"
         cat feeds.conf.default
         
         # 清理所有旧feeds（确保全新更新）
         rm -rf feeds/*
         
-        # 步骤1：更新核心feeds（仅基础包）
+        # 步骤1：更新核心feeds（带详细日志）
         echo "Step 1: Updating core feeds..."
         for i in {1..5}; do
-          ./scripts/feeds update base packages luci 2>&1
+          echo "Attempt $i/5 to update core feeds..."
+          ./scripts/feeds update -a 2>&1 | tee feeds_update.log
           if [ $? -eq 0 ]; then
             echo "Core feeds updated successfully"
             break
@@ -94,45 +105,56 @@ jobs:
         
         if [ $i -eq 5 ]; then
           echo "Core feeds update failed after 5 attempts!"
+          cat feeds_update.log
           exit 1
         fi
         
-        # 步骤2：安装核心包并验证
+        # 步骤2：安装核心包并验证数量
         echo "Step 2: Installing core packages..."
-        ./scripts/feeds install -a base packages luci
+        ./scripts/feeds install -a 2>&1 | tee feeds_install.log
         if [ $? -ne 0 ]; then
           echo "Failed to install core packages!"
+          cat feeds_install.log
           exit 1
         fi
         
-        # 验证核心包数量（至少2000+）
-        CORE_PACKAGES=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
-        if [ $CORE_PACKAGES -lt 2000 ]; then
-          echo "Error: Only $CORE_PACKAGES core packages found (expected >2000)"
+        # 验证核心包数量（必须>2000）
+        PACKAGE_COUNT=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
+        if [ $PACKAGE_COUNT -lt 2000 ]; then
+          echo "Error: Only $PACKAGE_COUNT core packages found (expected >2000)"
+          echo "Available packages:"
+          ./scripts/feeds list | grep -vE '^#|^$' | sort > packages_list.txt
+          cat packages_list.txt
           exit 1
+        else
+          echo "✅ Core packages installed successfully ($PACKAGE_COUNT packages)"
         fi
         
-        # 步骤3：添加路由和电话源（逐步测试）
-        echo "Step 3: Adding routing and telephony feeds..."
-        echo "src-gz openwrt_routing $BASE_URL/packages/$CPU_ARCH/routing" >> feeds.conf.default
-        echo "src-gz openwrt_telephony $BASE_URL/packages/$CPU_ARCH/telephony" >> feeds.conf.default
+        # 步骤3：检查依赖包是否存在
+        echo "Step 3: Checking for missing dependencies..."
+        MISSING_DEPS=()
         
-        # 单独更新路由和电话源
-        for i in {1..3}; do
-          ./scripts/feeds update routing telephony 2>&1
-          if [ $? -eq 0 ]; then
-            echo "Routing/telephony feeds updated successfully"
-            break
-          else
-            echo "Retry $i/3: Routing/telephony update failed, retrying..."
-            sleep 10
+        # 检查关键依赖
+        for dep in libtirpc libpam liblzma libnetsnmp; do
+          if ! ./scripts/feeds list | grep -q $dep; then
+            MISSING_DEPS+=("$dep")
           fi
         done
         
-        if [ $i -eq 3 ]; then
-          echo "Warning: Routing/telephony feeds update failed, continuing without them..."
+        if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
+          echo "Warning: Missing dependencies: ${MISSING_DEPS[*]}"
+          echo "Attempting to install missing dependencies..."
+          
+          for dep in "${MISSING_DEPS[@]}"; do
+            ./scripts/feeds install $dep 2>&1 | tee -a feeds_install.log
+            if [ $? -ne 0 ]; then
+              echo "Failed to install $dep"
+            else
+              echo "✅ $dep installed successfully"
+            fi
+          done
         else
-          ./scripts/feeds install -a routing telephony
+          echo "All required dependencies are present"
         fi
         
         # 步骤4：添加自定义源（最后处理）
@@ -140,13 +162,13 @@ jobs:
         echo "src-git kenzo https://github.com/kenzok8/openwrt-packages.git" >> feeds.conf.default
         echo "src-git small https://github.com/kenzok8/small.git" >> feeds.conf.default
         
-        # 分步更新自定义源（每次只更新一个）
+        # 分步更新自定义源
         for feed in kenzo small; do
           for i in {1..3}; do
             echo "Updating $feed feed..."
-            ./scripts/feeds update $feed 2>&1
+            ./scripts/feeds update $feed 2>&1 | tee -a feeds_update.log
             if [ $? -eq 0 ]; then
-              ./scripts/feeds install -a $feed
+              ./scripts/feeds install -a $feed 2>&1 | tee -a feeds_install.log
               break
             else
               echo "Retry $i/3: $feed update failed, retrying..."
@@ -156,12 +178,12 @@ jobs:
         done
         
         # 最终验证
-        TOTAL_PACKAGES=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
-        echo "Total available packages: $TOTAL_PACKAGES"
-        if [ $TOTAL_PACKAGES -lt 2000 ]; then
-          echo "Warning: Only $TOTAL_PACKAGES packages found, check feeds configuration!"
+        FINAL_PACKAGE_COUNT=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
+        echo "Total available packages: $FINAL_PACKAGE_COUNT"
+        if [ $FINAL_PACKAGE_COUNT -lt 2000 ]; then
+          echo "Warning: Only $FINAL_PACKAGE_COUNT packages found, check feeds configuration!"
         else
-          echo "Feeds update completed successfully"
+          echo "✅ Feeds update completed successfully"
         fi
     - name: Customize feeds (Part 1)
       run: |
