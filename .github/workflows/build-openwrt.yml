@@ -100,48 +100,47 @@ jobs:
         # 设备树完整性校验
         if [ ! -f "$DTS_DIR/$DEVICE_TREE" ]; then
           echo "生成JD BE6500设备树..."
-          > "$DTS_DIR/$DEVICE_TREE"
+          touch "$DTS_DIR/$DEVICE_TREE"
           
-          # 核心设备树配置（关键：兼容ipq807x目标）
-          cat > "$DTS_DIR/$DEVICE_TREE" << 'EOF'
-/dts-v1/;
-#include "qcom,ipq5332.dtsi"
-#include "ipq807x.dtsi"
-
-/ {
-  model = "JD BE6500";
-  compatible = "qcom,ipq5332", "qcom,ipq5000", "qcom,ipq807x";
-
-  chosen {
-    bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";
-  };
-
-  memory@80000000 {
-    device_type = "memory";
-    reg = <0x80000000 0x40000000>; /* 1GB */
-  };
-
-  # 网络配置（根据实际硬件调整）
-  ethernet@1a10000 {
-    compatible = "qcom,ipq8074-gmac", "qcom,ipq8064-gmac";
-    reg = <0x1a10000 0x10000>;
-    interrupts = <0 42 4>;
-    qcom,phy-handle = <&switch0_phy0>;
-    qcom,mdio-bus = <&mdio>;
-    qcom,port-id = <0>;
-    qcom,rxq-pool = <0>;
-    qcom,txq-pool = <0>;
-    qcom,ptp-clock = <0>;
-  };
-
-  mdio@1a14000 {
-    compatible = "qcom,ipq8074-mdio";
-    reg = <0x1a14000 0x1000>;
-    #address-cells = <1>;
-    #size-cells = <0>;
-  };
-};
-EOF
+          # 使用echo替代cat << EOF
+          echo "/dts-v1/;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "#include \"qcom,ipq5332.dtsi\"" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "#include \"ipq807x.dtsi\"" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "/ {" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  model = \"JD BE6500\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  compatible = \"qcom,ipq5332\", \"qcom,ipq5000\", \"qcom,ipq807x\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  chosen {" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    bootargs = \"earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  };" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  memory@80000000 {" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    device_type = \"memory\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    reg = <0x80000000 0x40000000>; /* 1GB */" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  };" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  # 网络设备配置（根据BE6500实际硬件调整）" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  ethernet@1a10000 {" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    compatible = \"qcom,ipq8074-gmac\", \"qcom,ipq8064-gmac\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    reg = <0x1a10000 0x10000>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    interrupts = <0 42 4>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,phy-handle = <&switch0_phy0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,mdio-bus = <&mdio>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,port-id = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,rxq-pool = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,txq-pool = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,ptp-clock = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  };" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  mdio@1a14000 {" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    compatible = \"qcom,ipq8074-mdio\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    reg = <0x1a14000 0x1000>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    #address-cells = <1>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    #size-cells = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  };" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "};" >> "$DTS_DIR/$DEVICE_TREE"
+          
           echo "设备树已生成: $DTS_DIR/$DEVICE_TREE"
         else
           echo "设备树已存在，跳过生成"
@@ -256,12 +255,12 @@ EOF
       run: |
         cd $OPENWRT_PATH
         # 根据用户输入启用功能
-        if [ ${{ github.event.inputs.with_wsdd2 == 'true' ]]; then
+        if [ ${{ github.event.inputs.with_wsdd2 == 'true' }} ]; then
           echo "CONFIG_PACKAGE_wsdd2=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-wsdd2=y" >> .config
         fi
         
-        if [ ${{ github.event.inputs.with_samba4 == 'true' ]]; then
+        if [ ${{ github.event.inputs.with_samba4 == 'true' }} ]; then
           echo "CONFIG_PACKAGE_samba4=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-samba4=y" >> .config
         fi
@@ -391,7 +390,7 @@ EOF
         BUILD_HOST=$(hostname)
         
         # 生成版本信息文件
-        > version.info
+        touch version.info
         echo "OpenWrt 固件 for JD BE6500 (IPQ5332)" >> version.info
         echo "编译时间: $BUILD_TIME" >> version.info
         echo "编译主机: $BUILD_HOST" >> version.info
