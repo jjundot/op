@@ -149,31 +149,8 @@ jobs:
           echo "设备树已存在，跳过生成"
         fi
 
-    - name: 智能Feeds配置（去重+依赖修复）
-      run: |
-        cd $OPENWRT_PATH
-        # 备份原始Feeds配置
-        cp $FEEDS_CONF ${FEEDS_CONF}.bak
-        
-        # 1. 清理重复源（保留唯一实例）
-        UNIQUE_FEEDS=$(cat $FEEDS_CONF | grep -v '^#' | sort -u)
-        > $FEEDS_CONF
-        echo "$UNIQUE_FEEDS" >> $FEEDS_CONF
-        
-        # 2. 强制添加核心源（确保依赖可用）
-        echo "src-git lienol https://github.com/Lienol/openwrt-package" >> $FEEDS_CONF
-        echo "src-git kenzo https://github.com/kenzok8/openwrt-packages" >> $FEEDS_CONF
-        echo "src-git small https://github.com/kenzok8/small" >> $FEEDS_CONF
-        
-        # 3. 添加官方源（补充基础包）
-        echo "src-gz openwrt_core https://downloads.openwrt.org/releases/23.05.0/targets/$ARCH/$SUBARCH/packages" >> $FEEDS_CONF
-        echo "src-gz openwrt_base https://downloads.openwrt.org/releases/23.05.0/packages/$CPU_ARCH/base" >> $FEEDS_CONF
-        echo "src-gz openwrt_luci https://downloads.openwrt.org/releases/23.05.0/packages/$CPU_ARCH/luci" >> $FEEDS_CONF
-        echo "src-gz openwrt_packages https://downloads.openwrt.org/releases/23.05.0/packages/$CPU_ARCH/packages" >> $FEEDS_CONF
-        
-        # 4. 显示最终Feeds配置
-        echo "=== 最终Feeds配置 ==="
-        cat $FEEDS_CONF
+        cat $FEEDS_CONFF
+
 
     - name: 依赖强化安装（解决历史报错）
       run: |
@@ -202,13 +179,14 @@ jobs:
             MISSING_PACKAGES+=($pkg)
             echo "⚠️ 缺失依赖: $pkg，尝试手动添加"
             
-            # 自动克隆缺失的包（示例：luci-app-samba）
+            # 自动克隆缺失的包
             if [ $pkg == "luci-app-samba" ]; then
               mkdir -p package/custom/luci
               git clone https://github.com/openwrt/luci.git package/custom/luci
             elif [ $pkg == "wsdd2" ]; then
               mkdir -p package/custom/wsdd2
-              git clone https://github.com/gena01/wsdd2.git package/custom/wsdd2
+              # 使用正确的wsdd2仓库地址
+              git clone https://github.com/small-5/wsdd2.git package/custom/wsdd2
             elif [ $pkg == "libpam" ]; then
               mkdir -p package/custom/packages
               git clone https://github.com/openwrt/packages.git package/custom/packages
