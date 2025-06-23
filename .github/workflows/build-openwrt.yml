@@ -159,6 +159,43 @@ jobs:
           };
           EOF
         fi
+        # 生成feeds.conf.default（严格格式，EOF必须顶格）
+        cat > feeds.conf.default << 'EOF'
+        src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/ipq807x/generic/packages
+        src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/base
+        src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/luci
+        src-gz openwrt_packages https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/packages
+        src-git lienol https://github.com/Lienol/openwrt-package
+        EOF
+        
+        # 更新Feeds（带重试机制）
+        rm -rf feeds/*
+        for i in {1..5}; do
+          echo "Attempt $i/5 to update feeds..."
+          ./scripts/feeds update -a 2>&1 | tee feeds.log
+          if [ $? -eq 0 ]; then
+            ./scripts/feeds install -a 2>&1 | tee -a feeds.log
+            if [ $? -eq 0 ]; then
+              PACKAGE_COUNT=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
+              echo "找到 $PACKAGE_COUNT 个软件包"
+              # 写入目标配置
+              echo "CONFIG_TARGET_ipq807x=y" >> .config
+              echo "CONFIG_TARGET_ipq807x_generic=y" >> .config
+              echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> .config
+              break
+            fi
+          fi
+          rm -rf feeds/*
+          sleep 15
+        done
+        
+        # 检查Feeds更新结果
+        if [ ! -d "feeds" ]; then
+          echo "Feeds更新失败，退出构建"
+          cat feeds.log
+          exit 1
+        fi
+
         
         # 其余部分保持不变...
     - name: Customize feeds (Part 1)
