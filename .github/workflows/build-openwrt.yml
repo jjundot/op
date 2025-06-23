@@ -8,7 +8,7 @@ on:
 env:
   LIENOL_REPO: https://github.com/Lienol/openwrt          # Lienol主仓库URL
   LIENOL_TARGET_REPO: https://github.com/Lienol/openwrt-target-ipq807x  # IPQ807x目标仓库
-  LIENOL_BRANCH: 24.10                                   # Lienol默认分支
+  LIENOL_BRANCH: main                                  # Lienol默认分支
   ARCH: ipq807x                                          # 目标架构
   SUBARCH: generic                                       # 子架构
   CPU_ARCH: aarch64_cortex-a53                           # CPU架构
@@ -56,9 +56,19 @@ jobs:
       run: |
         # 清理旧目录
         rm -rf openwrt
+        
+        # 检查分支是否存在
+        echo "Checking if branch $LIENOL_BRANCH exists..."
+        if ! git ls-remote --heads $LIENOL_REPO $LIENOL_BRANCH | grep -q $LIENOL_BRANCH; then
+          echo "Branch $LIENOL_BRANCH does not exist in $LIENOL_REPO"
+          echo "Available branches:"
+          git ls-remote --heads $LIENOL_REPO | awk '{print $2}'
+          exit 1
+        fi
+        
+        # 克隆仓库
         for i in {1..3}; do
           echo "Attempt $i/3 to clone Lienol's OpenWrt repo..."
-          # 带分支的完整克隆命令
           git clone --depth=1 $LIENOL_REPO -b $LIENOL_BRANCH openwrt
           if [ $? -eq 0 ]; then
             echo "✅ 仓库克隆成功"
