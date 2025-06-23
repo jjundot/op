@@ -7,13 +7,12 @@ on:
 
 env:
   LIENOL_REPO: https://github.com/Lienol/openwrt          # Lienol主仓库
-  LIENOL_TARGET_REPO: https://github.com/Lienol/openwrt-target-ipq5000  # IPQ5000目标仓库
   LIENOL_BRANCH: 23.05                                  # 使用23.05分支
-  ARCH: ipq5000                                          # 修正为IPQ5000架构
-  SUBARCH: ipq53xx                                       # 子架构设为ipq53xx
+  ARCH: ipq807x                                          # 使用ipq807x目标（兼容IPQ5332）
+  SUBARCH: generic                                       # 通用子架构
   CPU_ARCH: aarch64_cortex-a53                           # CPU架构
-  FEEDS_CONF: feeds.conf.default                         # Feeds配置
-  CONFIG_FILE: .config                                   # 编译配置
+  FEEDS_CONF: feeds.conf.default                         # Feeds配置文件
+  CONFIG_FILE: .config                                   # 编译配置文件
   DIY_P1_SH: diy-part1.sh                                # 自定义脚本1
   DIY_P2_SH: diy-part2.sh                                # 自定义脚本2
   UPLOAD_BIN_DIR: false                                  # 不上传bin目录
@@ -86,37 +85,7 @@ jobs:
       run: |
         cd $OPENWRT_PATH
         
-        # 处理IPQ5000目标支持
-        if [ ! -d "target/linux/$ARCH" ]; then
-          echo "Cloning IPQ5000 target support..."
-          for i in {1..3}; do
-            git clone --depth=1 $LIENOL_TARGET_REPO -b $LIENOL_BRANCH temp_repo
-            if [ $? -ne 0 ]; then
-              echo "❌ 克隆目标仓库失败，重试中..."
-              rm -rf temp_repo
-              sleep 10
-              continue
-            fi
-            
-            mv temp_repo/target/linux/$ARCH ../target/linux/
-            rm -rf temp_repo
-            
-            if [ -d "target/linux/$ARCH" ]; then
-              echo "✅ IPQ5000目标支持克隆成功"
-              break
-            fi
-            
-            echo "❌ 克隆失败，10秒后重试..."
-            sleep 10
-          done
-          
-          if [ ! -d "target/linux/$ARCH" ]; then
-            echo "💥 无法获取IPQ5000目标支持，退出"
-            exit 1
-          fi
-        fi
-        
-        # 创建设备树（IPQ5332专用）
+        # 创建设备树（IPQ5332在IPQ807x目标下的适配）
         DEVICE_TREE="qcom,ipq5332-jd-be6500.dts"
         DTS_DIR="target/linux/$ARCH/dts"
         mkdir -p "$DTS_DIR"
@@ -125,13 +94,14 @@ jobs:
           echo "生成JD BE6500设备树..."
           > "$DTS_DIR/$DEVICE_TREE"
           
-          # 设备树内容（IPQ5332专用）
+          # 设备树内容（关键修改：兼容ipq807x目标）
           echo "/dts-v1/;" >> "$DTS_DIR/$DEVICE_TREE"
           echo "#include \"qcom,ipq5332.dtsi\"" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "#include \"ipq807x.dtsi\"" >> "$DTS_DIR/$DEVICE_TREE"  # 引入ipq807x基础配置
           echo "" >> "$DTS_DIR/$DEVICE_TREE"
           echo "/ {" >> "$DTS_DIR/$DEVICE_TREE"
           echo "  model = \"JD BE6500\";" >> "$DTS_DIR/$DEVICE_TREE"
-          echo "  compatible = \"qcom,ipq5332\", \"qcom,ipq5000\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  compatible = \"qcom,ipq5332\", \"qcom,ipq5000\", \"qcom,ipq807x\";" >> "$DTS_DIR/$DEVICE_TREE"
           echo "" >> "$DTS_DIR/$DEVICE_TREE"
           echo "  chosen {" >> "$DTS_DIR/$DEVICE_TREE"
           echo "    bootargs = \"earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8\";" >> "$DTS_DIR/$DEVICE_TREE"
@@ -141,18 +111,38 @@ jobs:
           echo "    device_type = \"memory\";" >> "$DTS_DIR/$DEVICE_TREE"
           echo "    reg = <0x80000000 0x40000000>; /* 1GB */" >> "$DTS_DIR/$DEVICE_TREE"
           echo "  };" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  # 网络设备配置（根据BE6500实际硬件调整）" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  ethernet@1a10000 {" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    compatible = \"qcom,ipq8074-gmac\", \"qcom,ipq8064-gmac\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    reg = <0x1a10000 0x10000>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    interrupts = <0 42 4>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,phy-handle = <&switch0_phy0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,mdio-bus = <&mdio>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,port-id = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,rxq-pool = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,txq-pool = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,ptp-clock = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  };" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  mdio@1a14000 {" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    compatible = \"qcom,ipq8074-mdio\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    reg = <0x1a14000 0x1000>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    #address-cells = <1>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    #size-cells = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  };" >> "$DTS_DIR/$DEVICE_TREE"
           echo "};" >> "$DTS_DIR/$DEVICE_TREE"
           
           echo "设备树内容:"
           cat "$DTS_DIR/$DEVICE_TREE"
         fi
         
-        # 生成feeds.conf.default（IPQ5332适配源）
+        # 生成feeds配置（指向ipq807x源）
         if [ ! -f "feeds.conf.default" ]; then
           echo "生成feeds配置文件..."
           > feeds.conf.default
           
-          echo "src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/ipq5000/ipq53xx/packages" >> feeds.conf.default
+          echo "src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/ipq807x/generic/packages" >> feeds.conf.default
           echo "src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/base" >> feeds.conf.default
           echo "src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/luci" >> feeds.conf.default
           echo "src-gz openwrt_packages https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/packages" >> feeds.conf.default
@@ -175,10 +165,10 @@ jobs:
               PACKAGE_COUNT=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
               echo "✅ 找到 $PACKAGE_COUNT 个软件包"
               
-              # 写入目标配置（IPQ5332专用）
-              echo "CONFIG_TARGET_ipq5000=y" >> .config
-              echo "CONFIG_TARGET_ipq5000_generic=y" >> .config
-              echo "CONFIG_TARGET_IPQ5000_DEVICE_jd-be6500=y" >> .config
+              # 写入目标配置
+              echo "CONFIG_TARGET_ipq807x=y" >> .config
+              echo "CONFIG_TARGET_ipq807x_generic=y" >> .config
+              echo "CONFIG_TARGET_IPQ807X_DEVICE_generic=y" >> .config  # 通用目标，通过设备树覆盖
               break
             else
               echo "❌ Feeds安装失败"
@@ -222,12 +212,12 @@ jobs:
         # 移除可能冲突的软件包
         sed -i '/CONFIG_PACKAGE_luci-app-samba/d' .config
         sed -i '/CONFIG_PACKAGE_luci-app-mwan3helper/d' .config
-        sed -i '/CONFIG_PACKAGE_luci-app-passwall/d' .config
         
         # 添加IPQ5332必要驱动
         echo "CONFIG_PACKAGE_kmod-ath11k-ct=y" >> .config       # Wi-Fi 7驱动
         echo "CONFIG_PACKAGE_kmod-qca-ppe=y" >> .config        # PPE加速模块
         echo "CONFIG_PACKAGE_kmod-ledtrig-netdev=y" >> .config # 网络指示灯驱动
+        echo "CONFIG_PACKAGE_ath11k-firmware-qca64=y" >> .config # IPQ5332专用固件
 
     - name: Customize configuration (Part 2)
       run: |
