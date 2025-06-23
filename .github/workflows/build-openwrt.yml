@@ -145,7 +145,7 @@ jobs:
           # 创建空文件
           touch "$DTS_DIR/$DEVICE_TREE"
           
-          # 使用sed追加内容
+          # 使用sed追加内容，每行用单独的sed命令
           sed -i '$a\/dts-v1\/;' "$DTS_DIR/$DEVICE_TREE"
           sed -i '$a#include "qcom,ipq5322.dtsi"' "$DTS_DIR/$DEVICE_TREE"
           sed -i '$a' "$DTS_DIR/$DEVICE_TREE"
