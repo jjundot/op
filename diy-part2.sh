@@ -33,6 +33,33 @@ vm.swappiness=10
 fs.file-max=65536
 EOF
 
+# 优化网络参数
+cat >> package/base-files/files/etc/sysctl.conf << EOF
+# 网络优化
+net.core.default_qdisc=fq_codel
+net.ipv4.tcp_congestion_control=bbr
+net.ipv4.ip_forward=1
+net.ipv4.conf.all.send_redirects=0
+net.ipv4.conf.default.send_redirects=0
+net.ipv4.icmp_echo_ignore_broadcasts=1
+net.ipv4.icmp_ignore_bogus_error_responses=1
+EOF
+
+# 优化Wi-Fi 7 (IPQ5322/QCN6224) 驱动参数
+cat >> package/kernel/mac80211/files/lib/wifi/mac80211.sh << EOF
+  option country 'CN'
+  option channel 'auto'
+  option hwmode '11ax'
+  option path 'pci0000:00/0000:00:00.0'
+  option htmode 'VHT80'
+  option he_bandwidth '80'
+  option he_su_beamformer '1'
+  option he_su_beamformee '1'
+EOF
+
+# 设置5G频段默认SSID和密码
+sed -i 's/wifi_ssid=JD-BE6500-OpenWrt/wifi_ssid=JD-BE6500-5G/g' package/kernel/mac80211/files/lib/wifi/mac80211.sh
+sed -i '/set wireless.default_radio${devidx}.encryption=none/a\set wireless.default_radio${devidx}.key=YourWiFiPassword' package/kernel/mac80211/files/lib/wifi/mac80211.sh
 # 调整防火墙规则
 cat > package/network/config/firewall/files/firewall.user << EOF
 # 启用BBR拥塞控制
@@ -44,7 +71,17 @@ iptables -A INPUT -p icmp --icmp-type echo-request -j DROP
 EOF
 
 
+#  调整系统内存分配（针对1GB RAM设备）
+sed -i 's/CONFIG_DEFAULT_TARGET_OPTIMIZATION="-Os"/CONFIG_DEFAULT_TARGET_OPTIMIZATION="-O2"/g' .config
+sed -i 's/CONFIG_USE_MUSL_DYNAMIC_LINKER=y/# CONFIG_USE_MUSL_DYNAMIC_LINKER is not set/g' .config
 
+#  增大文件系统空间
+sed -i 's/64k/256k/g' target/linux/qca-ipq807x/image/generic.mk  # 增大内核分区
+sed -i 's/128k/512k/g' target/linux/qca-ipq807x/image/generic.mk  # 增大rootfs分区
+
+#  优化内核参数
+sed -i 's/CONFIG_KERNEL_DEBUG_INFO=y/# CONFIG_KERNEL_DEBUG_INFO is not set/g' .config
+sed -i 's/CONFIG_KERNEL_IKHEADERS=y/# CONFIG_KERNEL_IKHEADERS is not set/g' .config
 
 
 
