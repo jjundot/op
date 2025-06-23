@@ -140,32 +140,32 @@ jobs:
         if [ ! -f "$DTS_DIR/$DEVICE_TREE" ]; then
           echo "生成JD BE6500设备树..."
           cat > "$DTS_DIR/$DEVICE_TREE" << 'EOF'
-/dts-v1/;
-#include "qcom,ipq5322.dtsi"
+          /dts-v1/;
+          #include "qcom,ipq5322.dtsi"
 
-/ {
-  model = "JD BE6500";
-  compatible = "qcom,ipq5322", "qcom,ipq5000";
+          / {
+          model = "JD BE6500";
+          compatible = "qcom,ipq5322", "qcom,ipq5000";
 
-  chosen {
-    bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";
-  };
+          chosen {
+            bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";
+          };
 
-  memory@80000000 {
-    device_type = "memory";
-    reg = <0x80000000 0x40000000>; /* 1GB */
-  };
-};
-EOF
+          memory@80000000 {
+            device_type = "memory";
+            reg = <0x80000000 0x40000000>; /* 1GB */
+          };
+          };
+          EOF
         fi
         # 生成feeds.conf.default（严格格式，EOF必须顶格）
         cat > feeds.conf.default << EOF
-src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/ipq807x/generic/packages
-src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/base
-src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/luci
-src-gz openwrt_packages https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/packages
-src-git lienol https://github.com/Lienol/openwrt-package
-EOF
+        src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/ipq807x/generic/packages
+        src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/base
+        src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/luci
+        src-gz openwrt_packages https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/packages
+        src-git lienol https://github.com/Lienol/openwrt-package
+        EOF
         
         # 更新Feeds（带重试机制）
         rm -rf feeds/*
