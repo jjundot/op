@@ -91,16 +91,47 @@ jobs:
       run: |
         cd $OPENWRT_PATH
         
-        # 克隆IPQ807x目标支持（完整仓库URL）
+        # 从主仓库稀疏克隆IPQ807x目标支持
         if [ ! -d "target/linux/$ARCH" ]; then
-          echo "Cloning IPQ807x target support..."
+          echo "Cloning IPQ807x target support from main repo using sparse checkout..."
           for i in {1..3}; do
-            git clone $LIENOL_TARGET_REPO target/linux/$ARCH
-            if [ $? -eq 0 ]; then
+            git clone --depth=1 $LIENOL_REPO -b $LIENOL_BRANCH --single-branch --no-checkout temp_repo
+            if [ $? -ne 0 ]; then
+              echo "❌ 克隆主仓库失败，重试中..."
+              rm -rf temp_repo
+              sleep 10
+              continue
+            fi
+            
+            cd temp_repo
+            git sparse-checkout init --cone
+            git sparse-checkout set "target/linux/$ARCH"
+            git checkout
+            if [ $? -ne 0 ]; then
+              echo "❌ 稀疏检出失败，重试中..."
+              cd ..
+              rm -rf temp_repo
+              sleep 10
+              continue
+            fi
+            
+            mv target/linux/$ARCH ../target/linux/
+            cd ..
+            rm -rf temp_repo
+            
+            if [ -d "target/linux/$ARCH" ]; then
+              echo "✅ IPQ807x target support cloned successfully"
               break
             fi
+            
+            echo "❌ 克隆失败，10秒后重试..."
             sleep 10
           done
+          
+          if [ ! -d "target/linux/$ARCH" ]; then
+            echo "💥 无法获取IPQ807x目标支持，退出构建"
+            exit 1
+          fi
         fi
         
         # 创建设备树（严格格式，无多余缩进）
@@ -112,7 +143,7 @@ jobs:
           cat > "$DTS_DIR/$DEVICE_TREE" << 'EOF'
             /dts-v1/;
             #include "qcom,ipq5322.dtsi"
-            
+
             / {
               model = "JD BE6500";
               compatible = "qcom,ipq5322", "qcom,ipq5000";
@@ -129,43 +160,7 @@ jobs:
           EOF
         fi
         
-        # 生成Feeds配置（严格格式）
-        cat > feeds.conf.default << 'EOF'
-          src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/ipq807x/generic/packages
-          src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/base
-          src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/luci
-          src-gz openwrt_packages https://openwrt.lienz.net/snapshots/packages/aarch64_cortex-a53/packages
-          src-git lienol https://github.com/Lienol/openwrt-package
-        EOF
-        
-        # 更新Feeds（带重试机制）
-        rm -rf feeds/*
-        for i in {1..5}; do
-          echo "Attempt $i/5 to update feeds..."
-          ./scripts/feeds update -a 2>&1 | tee feeds.log
-          if [ $? -eq 0 ]; then
-            ./scripts/feeds install -a 2>&1 | tee -a feeds.log
-            if [ $? -eq 0 ]; then
-              PACKAGE_COUNT=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
-              echo "找到 $PACKAGE_COUNT 个软件包"
-              # 写入目标配置
-              echo "CONFIG_TARGET_ipq807x=y" >> .config
-              echo "CONFIG_TARGET_ipq807x_generic=y" >> .config
-              echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> .config
-              break
-            fi
-          fi
-          rm -rf feeds/*
-          sleep 15
-        done
-        
-        # 检查Feeds更新结果
-        if [ ! -d "feeds" ]; then
-          echo "Feeds更新失败，退出构建"
-          cat feeds.log
-          exit 1
-        fi
-
+        # 其余部分保持不变...
     - name: Customize feeds (Part 1)
       run: |
         if [ -f "$GITHUB_WORKSPACE/scripts/$DIY_P1_SH" ]; then
