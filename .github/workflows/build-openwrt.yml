@@ -13,6 +13,11 @@ on:
         required: false
         default: 'true'
         type: boolean
+      with_docker:
+        description: '编译包含 Docker 支持'
+        required: false
+        default: 'true'
+        type: boolean
   release:
     types: published  # 发布Release时触发
 
@@ -104,7 +109,7 @@ jobs:
           touch "$DTS_DIR/$DEVICE_TREE"
           
           # 使用echo生成设备树
-          echo "/dts-v1/;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "/dts-v1/;" > "$DTS_DIR/$DEVICE_TREE"
           echo "#include \"qcom,ipq5332.dtsi\"" >> "$DTS_DIR/$DEVICE_TREE"
           echo "#include \"ipq807x.dtsi\"" >> "$DTS_DIR/$DEVICE_TREE"
           echo "" >> "$DTS_DIR/$DEVICE_TREE"
@@ -201,7 +206,7 @@ jobs:
         
         # 检测并安装缺失的关键依赖
         MISSING_PACKAGES=()
-        for pkg in luci-app-samba wsdd2 luci-app-samba4 libpam liblzma libnetsnmp; do
+        for pkg in luci-app-samba wsdd2 luci-app-samba4 libpam liblzma libnetsnmp docker dockerd docker-compose luci-app-dockerman; do
           if ! ./scripts/feeds list | grep -q $pkg; then
             MISSING_PACKAGES+=($pkg)
             echo "⚠️ 缺失依赖: $pkg，尝试手动添加"
@@ -213,9 +218,9 @@ jobs:
             elif [ $pkg == "wsdd2" ]; then
               mkdir -p package/custom/wsdd2
               git clone https://github.com/small-5/wsdd2.git package/custom/wsdd2
-            elif [ $pkg == "libpam" ]; then
-              mkdir -p package/custom/packages
-              git clone https://github.com/openwrt/packages.git package/custom/packages
+            elif [ $pkg == "docker" ]; then
+              mkdir -p package/custom/docker
+              git clone https://github.com/lisaac/luci-app-dockerman.git package/custom/docker
             fi
           fi
         done
@@ -240,23 +245,15 @@ jobs:
           make defconfig
         fi
         
-        # 强制设置IPQ807x目标平台（IPQ5332适配，追加配置避免覆盖）
-        echo "CONFIG_TARGET_ipq807x=y" >> .config
-        echo "CONFIG_TARGET_ipq807x_generic=y" >> .config
-        echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> .config  # 关键：指定设备树目标
-        echo "CONFIG_TARGET_KERNEL_PARTSIZE=16" >> .config         # 设置固件分区大小（MB）
-        
-        # 启用必要的基础包（追加方式）
-        echo "CONFIG_PACKAGE_luci=y" >> .config
-        echo "CONFIG_PACKAGE_luci-ssl=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-ath11k-ct=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-qca-ppe=y" >> .config
-        echo "CONFIG_PACKAGE_fstools=y" >> .config
-        echo "CONFIG_PACKAGE_partx=y" >> .config
+        # 强制设置IPQ807x目标平台（IPQ5332适配，追加配置）
+        echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> .config  # 关键配置
+        echo "CONFIG_TARGET_DEVICE_PACKAGES_jd-be6500=\"kmod-ath11k-ct kmod-qca-ppe\"" >> .config
+        echo "CONFIG_TARGET_KERNEL_PARTSIZE=16" >> .config
+        echo "CONFIG_TARGET_ROOTFS_PARTSIZE=128" >> .config
         
         # 显示当前配置（用于调试）
-        echo "=== 当前.config 目标配置 ==="
-        grep -E "CONFIG_TARGET|CONFIG_DEVICE" .config
+        echo "=== 当前.config 设备配置 ==="
+        grep -E "CONFIG_TARGET_IPQ807X_DEVICE|CONFIG_TARGET_DEVICE_PACKAGES" .config
 
     - name: 动态依赖配置（根据输入参数）
       run: |
@@ -272,6 +269,23 @@ jobs:
           echo "CONFIG_PACKAGE_luci-app-samba4=y" >> .config
         fi
         
+        # 根据用户输入添加Docker支持
+        if [ ${{ github.event.inputs.with_docker == 'true' }} ]; then
+          echo "CONFIG_PACKAGE_docker=y" >> .config
+          echo "CONFIG_PACKAGE_docker-compose=y" >> .config
+          echo "CONFIG_PACKAGE_dockerd=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-dockerman=y" >> .config
+          echo "CONFIG_PACKAGE_luci-i18n-dockerman-zh-cn=y" >> .config
+          echo "CONFIG_PACKAGE_libltdl=y" >> .config
+          echo "CONFIG_PACKAGE_libseccomp=y" >> .config
+          echo "CONFIG_PACKAGE_conntrackd=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-br-netfilter=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-ipt-nat6=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-ip6tables-nat=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-sctp=y" >> .config
+          echo "CONFIG_PACKAGE_tzdata=y" >> .config
+        fi
+        
         # 修复历史依赖问题（追加方式）
         echo "CONFIG_PACKAGE_libpam=y" >> .config
         echo "CONFIG_PACKAGE_liblzma=y" >> .config
@@ -279,30 +293,91 @@ jobs:
         
         # 显示关键配置
         echo "=== 关键配置 ==="
-        grep -E "CONFIG_TARGET|CONFIG_PACKAGE_(samba|wsdd2|libpam)" .config
+        grep -E "CONFIG_TARGET|CONFIG_PACKAGE_(samba|wsdd2|docker|libpam)" .config
 
-    - name: 设备树强制关联（关键修复）
+    - name: 设备树强制关联（增强版）
       run: |
         cd $OPENWRT_PATH
         echo "=== 强制关联设备树到编译系统 ==="
         
-        # 检查设备树是否被编译系统识别
-        if ! grep -q "jd-be6500" target/linux/ipq807x/image/Makefile; then
-          echo "❌ 设备树未被识别，手动添加到Makefile..."
+        # 1. 确保设备树存在
+        DEVICE_TREE="target/linux/$ARCH/dts/qcom,ipq5332-jd-be6500.dts"
+        if [ ! -f "$DEVICE_TREE" ]; then
+          echo "❌ 设备树不存在，重新生成..."
+          # 重新生成设备树（使用echo）
+          echo "/dts-v1/;" > "$DEVICE_TREE"
+          echo "#include \"qcom,ipq5332.dtsi\"" >> "$DEVICE_TREE"
+          echo "#include \"ipq807x.dtsi\"" >> "$DEVICE_TREE"
+          echo "" >> "$DEVICE_TREE"
+          echo "/ {" >> "$DEVICE_TREE"
+          echo "  model = \"JD BE6500\";" >> "$DEVICE_TREE"
+          echo "  compatible = \"qcom,ipq5332\", \"qcom,ipq5000\", \"qcom,ipq807x\";" >> "$DEVICE_TREE"
+          echo "" >> "$DEVICE_TREE"
+          echo "  chosen {" >> "$DEVICE_TREE"
+          echo "    bootargs = \"earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8\";" >> "$DEVICE_TREE"
+          echo "  };" >> "$DEVICE_TREE"
+          echo "" >> "$DEVICE_TREE"
+          echo "  memory@80000000 {" >> "$DEVICE_TREE"
+          echo "    device_type = \"memory\";" >> "$DEVICE_TREE"
+          echo "    reg = <0x80000000 0x40000000>; /* 1GB */" >> "$DEVICE_TREE"
+          echo "  };" >> "$DEVICE_TREE"
+          echo "" >> "$DEVICE_TREE"
+          echo "  # 网络设备配置（根据BE6500实际硬件调整）" >> "$DEVICE_TREE"
+          echo "  ethernet@1a10000 {" >> "$DEVICE_TREE"
+          echo "    compatible = \"qcom,ipq8074-gmac\", \"qcom,ipq8064-gmac\";" >> "$DEVICE_TREE"
+          echo "    reg = <0x1a10000 0x10000>;" >> "$DEVICE_TREE"
+          echo "    interrupts = <0 42 4>;" >> "$DEVICE_TREE"
+          echo "    qcom,phy-handle = <&switch0_phy0>;" >> "$DEVICE_TREE"
+          echo "    qcom,mdio-bus = <&mdio>;" >> "$DEVICE_TREE"
+          echo "    qcom,port-id = <0>;" >> "$DEVICE_TREE"
+          echo "    qcom,rxq-pool = <0>;" >> "$DEVICE_TREE"
+          echo "    qcom,txq-pool = <0>;" >> "$DEVICE_TREE"
+          echo "    qcom,ptp-clock = <0>;" >> "$DEVICE_TREE"
+          echo "  };" >> "$DEVICE_TREE"
+          echo "" >> "$DEVICE_TREE"
+          echo "  mdio@1a14000 {" >> "$DEVICE_TREE"
+          echo "    compatible = \"qcom,ipq8074-mdio\";" >> "$DEVICE_TREE"
+          echo "    reg = <0x1a14000 0x1000>;" >> "$DEVICE_TREE"
+          echo "    #address-cells = <1>;" >> "$DEVICE_TREE"
+          echo "    #size-cells = <0>;" >> "$DEVICE_TREE"
+          echo "  };" >> "$DEVICE_TREE"
+          echo "};" >> "$DEVICE_TREE"
+        fi
+        
+        # 2. 确保设备树被编译系统识别
+        MAKEFILE="target/linux/$ARCH/image/Makefile"
+        if ! grep -q "jd-be6500" "$MAKEFILE"; then
+          echo "❌ 设备树未被Makefile识别，手动添加..."
           
-          # 手动添加设备树定义到Makefile（适用于Lienol分支）
-          sed -i '/define Device\/generic/a \
-          define Device\/jd-be6500\n  $(Device\/generic)\n  DEVICE_TITLE := JD BE6500 (IPQ5332)\n  DEVICE_DTS := qcom,ipq5332-jd-be6500\n  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe\nendef\n$(eval $(call Device,jd-be6500))' target/linux/ipq807x/image/Makefile
+          # 定义设备树信息（使用echo）
+          echo "" >> "$MAKEFILE"
+          echo "define Device/jd-be6500" >> "$MAKEFILE"
+          echo "  \$(Device/generic)" >> "$MAKEFILE"
+          echo "  DEVICE_TITLE := JD BE6500 (IPQ5332)" >> "$MAKEFILE"
+          echo "  DEVICE_DTS := qcom,ipq5332-jd-be6500" >> "$MAKEFILE"
+          echo "  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac" >> "$MAKEFILE"
+          echo "endef" >> "$MAKEFILE"
+          echo "\$(eval \$(call Device,jd-be6500))" >> "$MAKEFILE"
           
-          # 验证修改
-          if grep -q "jd-be6500" target/linux/ipq807x/image/Makefile; then
-            echo "✅ 设备树已成功添加到Makefile"
+          if grep -q "jd-be6500" "$MAKEFILE"; then
+            echo "✅ 设备树已添加到Makefile"
           else
-            echo "❌ 设备树添加失败，退出"
+            echo "❌ 设备树添加失败"
             exit 1
           fi
         else
-          echo "✅ 设备树已被编译系统识别"
+          echo "✅ 设备树已被Makefile识别"
+        fi
+
+    - name: 应用diy-part1.sh脚本（自定义配置）
+      run: |
+        cd $OPENWRT_PATH
+        if [ -f "$DIY_P1_SH" ]; then
+          echo "执行自定义脚本: $DIY_P1_SH"
+          chmod +x $DIY_P1_SH
+          ./$DIY_P1_SH
+        else
+          echo "❌ 自定义脚本不存在: $DIY_P1_SH"
         fi
 
     - name: 下载依赖包（带缓存）
@@ -434,7 +509,7 @@ jobs:
         
         # 生成版本信息文件
         touch version.info
-        echo "OpenWrt 固件 for JD BE6500 (IPQ5332)" >> version.info
+        echo "OpenWrt 固件 for JD BE6500 (IPQ5332)" > version.info
         echo "编译时间: $BUILD_TIME" >> version.info
         echo "编译主机: $BUILD_HOST" >> version.info
         echo "Git 提交: $COMMIT_ID" >> version.info
@@ -447,7 +522,7 @@ jobs:
         cat version.info
 
     - name: 上传固件到Artifact
-      if: steps.version.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true'
+      if: env.UPLOAD_FIRMWARE == 'true'
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.release_version }}
@@ -460,7 +535,7 @@ jobs:
         if-no-files-found: error
 
     - name: 发布到GitHub Release
-      if: steps.version.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && github.event_name == 'release'
+      if: env.UPLOAD_RELEASE == 'true' && github.event_name == 'release'
       uses: softprops/action-gh-release@v1
       with:
         name: ${{ env.release_version }}
