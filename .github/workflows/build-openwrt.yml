@@ -43,33 +43,31 @@ jobs:
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
-
-    - name: Auto-detect and fix feeds URL + Update with retry
+    - name: Use Chinese mirrors + Update with retry
       run: |
         cd $OPENWRT_PATH
         
-        # 网络诊断（新增）
+        # 网络诊断（仅检查国内镜像）
         echo "Network diagnosis:"
-        ping -c 3 downloads.openwrt.org
+        ping -c 3 mirrors.tuna.tsinghua.edu.cn
         ping -c 3 gitee.com
-        curl -sI https://downloads.openwrt.org || echo "OpenWrt source is unreachable"
-        curl -sI https://gitee.com || echo "Gitee is unreachable"
+        curl -sI https://mirrors.tuna.tsinghua.edu.cn/openwrt || echo "TUNA mirror is unreachable"
         
-        # 获取当前分支名（如master或22.03）
+        # 获取当前分支名
         BRANCH=$(git branch --show-current || echo "$REPO_BRANCH")
         ARCH=qca-ipq807x/generic  # 针对JD BE6500的架构
         CPU_ARCH=aarch64_cortex-a53  # 针对IPQ5322的CPU架构
         
-        # 根据分支自动生成正确的源URL
+        # 使用清华大学镜像源
         if [[ $BRANCH == "master" || $BRANCH == "dev" ]]; then
-          BASE_URL="https://downloads.openwrt.org/snapshots"
+          BASE_URL="https://mirrors.tuna.tsinghua.edu.cn/openwrt/snapshots"
         else
-          # 移除v前缀（如果存在），如v23.05.0 → 23.05.0
+          # 移除v前缀（如果存在）
           CLEAN_BRANCH=${BRANCH#v}
-          BASE_URL="https://downloads.openwrt.org/releases/$CLEAN_BRANCH"
+          BASE_URL="https://mirrors.tuna.tsinghua.edu.cn/openwrt/releases/$CLEAN_BRANCH"
         fi
         
-        # 写入新的feeds.conf.default（使用国内镜像加速）
+        # 写入新的feeds.conf.default（全部使用国内镜像）
         cat > feeds.conf.default << EOF
         src-gz openwrt_core $BASE_URL/targets/$ARCH/packages
         src-gz openwrt_base $BASE_URL/packages/$CPU_ARCH/base
@@ -79,13 +77,13 @@ jobs:
         src-gz openwrt_telephony $BASE_URL/packages/$CPU_ARCH/telephony
         EOF
         
-        # 打印生成的配置（新增）
+        # 使用Gitee镜像替代GitHub源（提高国内访问速度）
+        echo "src-git kenzo https://gitee.com/kenzok8/openwrt-packages.git" >> feeds.conf.default
+        echo "src-git small https://gitee.com/kenzok8/small.git" >> feeds.conf.default
+        
+        # 打印生成的配置
         echo "Generated feeds.conf.default:"
         cat feeds.conf.default
-        
-        # 添加国内镜像源（使用备用地址）
-        echo "src-git kenzo https://github.com/kenzok8/openwrt-packages" >> feeds.conf.default
-        echo "src-git small https://github.com/kenzok8/small" >> feeds.conf.default
         
         # 清理旧的feeds缓存
         rm -rf feeds/*
@@ -96,7 +94,7 @@ jobs:
           ./scripts/feeds update -a || true  # 允许失败，以便清理
           rm -rf feeds/*  # 清理可能不完整的更新
           
-          # 详细的更新过程（新增）
+          # 详细的更新过程
           echo "Updating core feeds:"
           ./scripts/feeds update base packages luci routing telephony
           UPDATE_STATUS=$?
@@ -106,8 +104,8 @@ jobs:
             break
           else
             echo "Core feeds update failed, retrying..."
-            cat feeds/base/error.log 2>/dev/null  # 打印错误日志（如果有）
-            cat feeds/packages/error.log 2>/dev/null
+            # 打印更详细的错误日志
+            find feeds -name "error.log" -exec cat {} \; 2>/dev/null
           fi
           
           if [ $i -eq 3 ]; then
@@ -128,7 +126,7 @@ jobs:
             break
           else
             echo "Custom feeds update failed, retrying..."
-            cat feeds/kenzo/error.log 2>/dev/null  # 打印错误日志（如果有）
+            find feeds -name "error.log" -exec cat {} \; 2>/dev/null
           fi
           
           if [ $i -eq 3 ]; then
@@ -141,7 +139,6 @@ jobs:
         # 安装所有feeds包
         echo "Installing all packages..."
         ./scripts/feeds install -a
-
     - name: Customize feeds (Part 1)
       run: |
         if [ -f "$GITHUB_WORKSPACE/scripts/$DIY_P1_SH" ]; then
