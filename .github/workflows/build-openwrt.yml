@@ -96,12 +96,12 @@ jobs:
         
         # 生成feeds.conf.default（移除多余缩进）
         cat > feeds.conf.default << 'EOF'
-src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/$ARCH/$SUBARCH/packages
-src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/$CPU_ARCH/base
-src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/$CPU_ARCH/luci
-src-gz openwrt_packages https://openwrt.lienz.net/snapshots/packages/$CPU_ARCH/packages
-src-git lienol https://github.com/Lienol/openwrt-package
-EOF
+          src-gz openwrt_core https://openwrt.lienz.net/snapshots/targets/$ARCH/$SUBARCH/packages
+          src-gz openwrt_base https://openwrt.lienz.net/snapshots/packages/$CPU_ARCH/base
+          src-gz openwrt_luci https://openwrt.lienz.net/snapshots/packages/$CPU_ARCH/luci
+          src-gz openwrt_packages https://openwrt.lienz.net/snapshots/packages/$CPU_ARCH/packages
+          src-git lienol https://github.com/Lienol/openwrt-package
+        EOF
         
         # 清理并更新feeds
         rm -rf feeds/*
