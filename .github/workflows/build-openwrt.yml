@@ -43,164 +43,125 @@ jobs:
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         cd openwrt
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
-    - name: Forced international mirror feeds update
+    - name: Minimal official feeds update
       run: |
         cd $OPENWRT_PATH
         
-        # 强制使用官方源（不依赖ping检测）
-        BEST_MIRROR="https://downloads.openwrt.org"
-        echo "Using official mirror: $BEST_MIRROR"
+        # 强制使用OpenWrt官方源（明确指定分支和架构）
+        BRANCH=$(git branch --show-current || echo "master")
+        ARCH=qca-ipq807x/generic  # JD BE6500架构
+        CPU_ARCH=aarch64_cortex-a53  # IPQ5322处理器架构
         
-        # 获取当前分支名
-        BRANCH=$(git branch --show-current || echo "$REPO_BRANCH")
-        ARCH=qca-ipq807x/generic
-        CPU_ARCH=aarch64_cortex-a53
-        
-        # 根据分支生成源URL
+        # 根据分支设置源URL（明确版本路径）
         if [[ $BRANCH == "master" || $BRANCH == "dev" ]]; then
-          BASE_URL="$BEST_MIRROR/snapshots"
+          BASE_URL="https://downloads.openwrt.org/snapshots"
         else
           CLEAN_BRANCH=${BRANCH#v}
-          BASE_URL="$BEST_MIRROR/releases/$CLEAN_BRANCH"
+          BASE_URL="https://downloads.openwrt.org/releases/$CLEAN_BRANCH.0"
         fi
         
-        # 写入新的feeds.conf.default（仅使用官方源）
+        # 写入极简feeds.conf.default（仅官方核心源）
         cat > feeds.conf.default << EOF
         src-gz openwrt_core $BASE_URL/targets/$ARCH/packages
         src-gz openwrt_base $BASE_URL/packages/$CPU_ARCH/base
         src-gz openwrt_luci $BASE_URL/packages/$CPU_ARCH/luci
         src-gz openwrt_packages $BASE_URL/packages/$CPU_ARCH/packages
-        src-gz openwrt_routing $BASE_URL/packages/$CPU_ARCH/routing
-        src-gz openwrt_telephony $BASE_URL/packages/$CPU_ARCH/telephony
+        # 暂时注释路由和电话相关源（避免冲突）
+        # src-gz openwrt_routing $BASE_URL/packages/$CPU_ARCH/routing
+        # src-gz openwrt_telephony $BASE_URL/packages/$CPU_ARCH/telephony
         EOF
         
-        # 先不添加自定义源，确保核心源可用
-        echo "Generated feeds.conf.default (official only):"
+        # 打印配置（便于验证）
+        echo "Generated minimal feeds.conf.default:"
         cat feeds.conf.default
         
-        # 创建详细的日志文件
-        LOG_FILE="feeds_update.log"
-        touch $LOG_FILE
-        
-        # 清理旧的feeds缓存
+        # 清理所有旧feeds（确保全新更新）
         rm -rf feeds/*
         
-        # 步骤1：更新并安装官方核心feeds
-        echo "Step 1: Updating and installing official core feeds..."
+        # 步骤1：更新核心feeds（仅基础包）
+        echo "Step 1: Updating core feeds..."
         for i in {1..5}; do
-          echo "Attempt $i/5 to update core feeds..."
-          ./scripts/feeds update -a 2>&1 | tee -a $LOG_FILE
-          UPDATE_STATUS=${PIPESTATUS[0]}
-          
-          if [ $UPDATE_STATUS -eq 0 ]; then
+          ./scripts/feeds update base packages luci 2>&1
+          if [ $? -eq 0 ]; then
             echo "Core feeds updated successfully"
-            
-            echo "Installing core packages..."
-            ./scripts/feeds install -a 2>&1 | tee -a $LOG_FILE
-            if [ $? -eq 0 ]; then
-              echo "✅ Core packages installed successfully"
-              break
-            else
-              echo "Failed to install core packages, retrying..."
-            fi
+            break
           else
-            echo "Core feeds update failed, retrying..."
+            echo "Retry $i/5: Core feeds update failed, cleaning and retrying..."
+            rm -rf feeds/*
+            sleep 10
           fi
-          
-          rm -rf feeds/*
-          sleep 10
         done
         
         if [ $i -eq 5 ]; then
           echo "Core feeds update failed after 5 attempts!"
-          echo "Full error log:"
-          cat $LOG_FILE
           exit 1
         fi
         
-        # 验证官方包数量（应该至少有2000+）
-        OFFICIAL_PACKAGES=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
-        echo "Total official packages: $OFFICIAL_PACKAGES"
-        
-        if [ $OFFICIAL_PACKAGES -lt 2000 ]; then
-          echo "Warning: Only $OFFICIAL_PACKAGES official packages found (expected >2000)"
+        # 步骤2：安装核心包并验证
+        echo "Step 2: Installing core packages..."
+        ./scripts/feeds install -a base packages luci
+        if [ $? -ne 0 ]; then
+          echo "Failed to install core packages!"
           exit 1
+        fi
+        
+        # 验证核心包数量（至少2000+）
+        CORE_PACKAGES=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
+        if [ $CORE_PACKAGES -lt 2000 ]; then
+          echo "Error: Only $CORE_PACKAGES core packages found (expected >2000)"
+          exit 1
+        fi
+        
+        # 步骤3：添加路由和电话源（逐步测试）
+        echo "Step 3: Adding routing and telephony feeds..."
+        echo "src-gz openwrt_routing $BASE_URL/packages/$CPU_ARCH/routing" >> feeds.conf.default
+        echo "src-gz openwrt_telephony $BASE_URL/packages/$CPU_ARCH/telephony" >> feeds.conf.default
+        
+        # 单独更新路由和电话源
+        for i in {1..3}; do
+          ./scripts/feeds update routing telephony 2>&1
+          if [ $? -eq 0 ]; then
+            echo "Routing/telephony feeds updated successfully"
+            break
+          else
+            echo "Retry $i/3: Routing/telephony update failed, retrying..."
+            sleep 10
+          fi
+        done
+        
+        if [ $i -eq 3 ]; then
+          echo "Warning: Routing/telephony feeds update failed, continuing without them..."
         else
-          echo "Official package installation verified successfully"
+          ./scripts/feeds install -a routing telephony
         fi
         
-        # 步骤2：添加并更新自定义源（谨慎处理）
-        echo "Step 2: Adding and updating custom feeds..."
-        
-        # 添加自定义源（使用GitHub官方地址）
+        # 步骤4：添加自定义源（最后处理）
+        echo "Step 4: Adding custom feeds..."
         echo "src-git kenzo https://github.com/kenzok8/openwrt-packages.git" >> feeds.conf.default
         echo "src-git small https://github.com/kenzok8/small.git" >> feeds.conf.default
         
-        echo "Updated feeds.conf.default (with custom sources):"
-        cat feeds.conf.default
-        
-        # 尝试更新自定义feeds
-        CUSTOM_FEEDS_SUCCESS=false
-        
-        for i in {1..3}; do
-          echo "Attempt $i/3 to update custom feeds..."
-          
-          # 备份现有feeds，以防更新失败
-          cp -r feeds feeds_backup
-          
-          # 仅更新自定义feeds
-          ./scripts/feeds update kenzo small 2>&1 | tee -a $LOG_FILE
-          UPDATE_STATUS=$?
-          
-          if [ $UPDATE_STATUS -eq 0 ]; then
-            echo "Custom feeds updated successfully"
-            
-            # 安装自定义包
-            echo "Installing custom packages..."
-            ./scripts/feeds install -a -f kenzo small 2>&1 | tee -a $LOG_FILE
+        # 分步更新自定义源（每次只更新一个）
+        for feed in kenzo small; do
+          for i in {1..3}; do
+            echo "Updating $feed feed..."
+            ./scripts/feeds update $feed 2>&1
             if [ $? -eq 0 ]; then
-              echo "✅ Custom packages installed successfully"
-              CUSTOM_FEEDS_SUCCESS=true
+              ./scripts/feeds install -a $feed
               break
             else
-              echo "Failed to install custom packages, restoring backup..."
-              rm -rf feeds
-              mv feeds_backup feeds
+              echo "Retry $i/3: $feed update failed, retrying..."
+              sleep 10
             fi
-          else
-            echo "Custom feeds update failed, restoring backup..."
-            rm -rf feeds
-            mv feeds_backup feeds
-          fi
-          
-          sleep 10
+          done
         done
-        
-        # 如果自定义源更新失败，继续构建但记录警告
-        if [ "$CUSTOM_FEEDS_SUCCESS" = "false" ]; then
-          echo "⚠️ Warning: Custom feeds update failed. Proceeding with official packages only."
-          # 从配置中移除失败的源
-          sed -i '/kenzo/d' feeds.conf.default
-          sed -i '/small/d' feeds.conf.default
-        fi
         
         # 最终验证
         TOTAL_PACKAGES=$(./scripts/feeds list | grep -vE '^#|^$' | wc -l)
         echo "Total available packages: $TOTAL_PACKAGES"
-        
         if [ $TOTAL_PACKAGES -lt 2000 ]; then
-          echo "Warning: Only $TOTAL_PACKAGES packages found (expected >2000)"
-          echo "Available packages:"
-          ./scripts/feeds list | grep -vE '^#|^$' | sort > available_packages.txt
-          cat available_packages.txt
-          
-          if [ "$CUSTOM_FEEDS_SUCCESS" = "false" ]; then
-            echo "Proceeding with official packages only..."
-          else
-            exit 1
-          fi
+          echo "Warning: Only $TOTAL_PACKAGES packages found, check feeds configuration!"
         else
-          echo "Package installation verified successfully"
+          echo "Feeds update completed successfully"
         fi
     - name: Customize feeds (Part 1)
       run: |
