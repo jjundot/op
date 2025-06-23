@@ -1,0 +1,134 @@
+name: Build OpenWrt for JD BE6500
+
+on:
+  workflow_dispatch:  # 手动触发
+  release:
+    types: published  # 发布Release时触发
+
+env:
+  REPO_URL: https://github.com/openwrt/openwrt  # OpenWrt源码仓库
+  REPO_BRANCH: master  # 主分支，可改为稳定版如v23.05.0
+  FEEDS_CONF: feeds.conf.default  # 软件包源配置
+  CONFIG_FILE: .config  # 编译配置文件
+  DIY_P1_SH: diy-part1.sh  # 自定义脚本（更新feeds前执行）
+  DIY_P2_SH: diy-part2.sh  # 自定义脚本（更新feeds后执行）
+  UPLOAD_BIN_DIR: false  # 是否上传bin目录（包含所有编译文件）
+  UPLOAD_FIRMWARE: true  # 是否上传固件
+  UPLOAD_RELEASE: true  # 是否发布到Release
+  TZ: Asia/Shanghai  # 时区设置
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04  # 运行环境
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        path: scripts
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get -y install build-essential subversion git-core libncurses5-dev zlib1g-dev gawk flex quilt libssl-dev xsltproc libxml-parser-perl mercurial bzr ecj cvs unzip python3-distutils file wget
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk
+
+    - name: Clone OpenWrt source
+      run: |
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        cd openwrt
+        echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
+
+    - name: Update feeds
+      run: |
+        cd $OPENWRT_PATH
+        cp $GITHUB_WORKSPACE/scripts/$FEEDS_CONF feeds.conf.default
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: Customize feeds (Part 1)
+      run: |
+        if [ -f "$GITHUB_WORKSPACE/scripts/$DIY_P1_SH" ]; then
+          cd $OPENWRT_PATH
+          chmod +x $GITHUB_WORKSPACE/scripts/$DIY_P1_SH
+          $GITHUB_WORKSPACE/scripts/$DIY_P1_SH
+        else
+          echo "No custom script $DIY_P1_SH found"
+        fi
+
+    - name: Load custom configuration
+      run: |
+        cd $OPENWRT_PATH
+        if [ -f "$GITHUB_WORKSPACE/scripts/$CONFIG_FILE" ]; then
+          cp $GITHUB_WORKSPACE/scripts/$CONFIG_FILE .config
+        else
+          echo "No custom config file found, using default"
+          make defconfig
+        fi
+
+    - name: Customize configuration (Part 2)
+      run: |
+        if [ -f "$GITHUB_WORKSPACE/scripts/$DIY_P2_SH" ]; then
+          cd $OPENWRT_PATH
+          chmod +x $GITHUB_WORKSPACE/scripts/$DIY_P2_SH
+          $GITHUB_WORKSPACE/scripts/$DIY_P2_SH
+        else
+          echo "No custom script $DIY_P2_SH found"
+        fi
+
+    - name: Download package dependencies
+      run: |
+        cd $OPENWRT_PATH
+        make download -j$(nproc)
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
+    - name: Build firmware
+      run: |
+        cd $OPENWRT_PATH
+        echo -e "$(nproc) thread build"
+        make -j$(nproc) V=s || make -j1 V=s  # 并行编译，失败则单线程重试
+
+    - name: Check space usage
+      run: |
+        df -h
+        du -sh $OPENWRT_PATH/bin
+
+    - name: Collect firmware files
+      id: collect
+      run: |
+        cd $OPENWRT_PATH/bin/targets/*/*
+        FIRMWARE_PATH=$(pwd)
+        echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
+        echo "::set-output name=status::success"
+        if [ -n "$(ls $FIRMWARE_PATH/*.bin 2>/dev/null)" ]; then
+          echo "FILES_AVAILABLE=true" >> $GITHUB_ENV
+        else
+          echo "FILES_AVAILABLE=false" >> $GITHUB_ENV
+        fi
+
+    - name: Upload firmware as artifact
+      if: steps.collect.outputs.status == 'success' && env.FILES_AVAILABLE == 'true' && env.UPLOAD_FIRMWARE == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: OpenWrt-Firmware-${{ github.sha }}
+        path: ${{ env.FIRMWARE_PATH }}
+        retention-days: 30
+
+    - name: Upload firmware to Release
+      if: steps.collect.outputs.status == 'success' && env.FILES_AVAILABLE == 'true' && env.UPLOAD_RELEASE == 'true' && github.event_name == 'release'
+      uses: softprops/action-gh-release@v1
+      with:
+        files: ${{ env.FIRMWARE_PATH }}/*
+        tag_name: ${{ github.ref_name }}
+        body: |
+          OpenWrt firmware for JD BE6500
+          Built from commit ${{ github.sha }}
+          Date: $(date +%Y-%m-%d)
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
