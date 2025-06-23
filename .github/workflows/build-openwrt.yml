@@ -39,7 +39,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get -y install build-essential subversion git-core libncurses5-dev zlib1g-dev gawk flex quilt libssl-dev xsltproc libxml-parser-perl mercurial bzr ecj cvs unzip python3-distutils file wget
+        sudo apt-get -y install build-essential subversion git-core libncurses5-dev zlib1g-dev gawk flex quilt libssl-dev xsltproc libxml-parser-perl mercurial bzr ecj cvs unzip python3-distutils file wget upx-ucl
         sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk
 
     - name: Configure Git Credentials
@@ -218,6 +218,14 @@ jobs:
         echo "CONFIG_PACKAGE_kmod-qca-ppe=y" >> .config        # PPE加速模块
         echo "CONFIG_PACKAGE_kmod-ledtrig-netdev=y" >> .config # 网络指示灯驱动
         echo "CONFIG_PACKAGE_ath11k-firmware-qca64=y" >> .config # IPQ5332专用固件
+        
+        # 添加缺失的依赖
+        echo "CONFIG_PACKAGE_luci-app-samba4=y" >> .config
+        echo "CONFIG_PACKAGE_pdnsd-alt=y" >> .config
+        echo "CONFIG_PACKAGE_chinadns-ng=y" >> .config
+        echo "CONFIG_PACKAGE_dns2socks=y" >> .config
+        echo "CONFIG_PACKAGE_tcping=y" >> .config
+        echo "CONFIG_PACKAGE_upx=y" >> .config
 
     - name: Customize configuration (Part 2)
       run: |
