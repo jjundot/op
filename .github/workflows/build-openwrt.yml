@@ -119,11 +119,11 @@ jobs:
           echo "src-git small https://github.com/kenzok8/small" >> $FEEDS_CONF
         fi
         
-        # 3. 添加官方源（补充基础包）
-        echo "src-gz openwrt_core https://downloads.openwrt.org/releases/23.05.0/targets/$ARCH/$SUBARCH/packages" >> $FEEDS_CONF
-        echo "src-gz openwrt_base https://downloads.openwrt.org/releases/23.05.0/packages/$CPU_ARCH/base" >> $FEEDS_CONF
-        echo "src-gz openwrt_luci https://downloads.openwrt.org/releases/23.05.0/packages/$CPU_ARCH/luci" >> $FEEDS_CONF
-        echo "src-gz openwrt_packages https://downloads.openwrt.org/releases/23.05.0/packages/$CPU_ARCH/packages" >> $FEEDS_CONF
+        # 3. **移除src-gz类型的源，改用官方git源**
+        echo "src-git packages https://git.openwrt.org/feed/packages.git^openwrt-23.05" >> $FEEDS_CONF
+        echo "src-git luci https://git.openwrt.org/project/luci.git^openwrt-23.05" >> $FEEDS_CONF
+        echo "src-git routing https://git.openwrt.org/feed/routing.git^openwrt-23.05" >> $FEEDS_CONF
+        echo "src-git telephony https://git.openwrt.org/feed/telephony.git^openwrt-23.05" >> $FEEDS_CONF
         
         # 4. 显示最终Feeds配置
         echo "=== 最终Feeds配置 ==="
@@ -167,54 +167,59 @@ jobs:
               mkdir -p package/custom/docker
               git clone https://github.com/lisaac/luci-app-dockerman.git package/custom/docker
             elif [ $pkg == "kmod-thermal-qcom" ]; then
-              # 修复kmod-thermal-qcom获取方式（OpenWrt 23.05版本）
-              echo "从OpenWrt主线仓库获取kmod-thermal-qcom..."
-              mkdir -p package/kernel/qca-thermal
-              cd package/kernel/qca-thermal
+              # 正确处理kmod-thermal-qcom依赖
+              echo "尝试从Lienol仓库获取kmod-thermal-qcom..."
               
-              # 从OpenWrt 23.05分支获取正确的文件
-              # 注意：23.05版本中thermal驱动结构已调整，直接使用内核自带的驱动
-              echo "include \$(TOPDIR)/rules.mk" > Makefile
-              echo "include \$(INCLUDE_DIR)/kernel.mk" >> Makefile
-              echo "" >> Makefile
-              echo "PKG_NAME:=kmod-thermal-qcom" >> Makefile
-              echo "PKG_RELEASE:=1" >> Makefile
-              echo "" >> Makefile
-              echo "include \$(INCLUDE_DIR)/package.mk" >> Makefile
-              echo "" >> Makefile
-              echo "define KernelPackage/thermal-qcom" >> Makefile
-              echo "  SUBMENU:=Other modules" >> Makefile
-              echo "  TITLE:=QCOM Thermal driver" >> Makefile
-              echo "  DEPENDS:=+kmod-hwmon" >> Makefile
-              echo "  KCONFIG:=" >> Makefile
-              echo "    CONFIG_THERMAL=y" >> Makefile
-              echo "    CONFIG_THERMAL_OF=y" >> Makefile
-              echo "    CONFIG_THERMAL_GOV_FAIR_SHARE=y" >> Makefile
-              echo "    CONFIG_THERMAL_GOV_POWER_ALLOCATOR=y" >> Makefile
-              echo "    CONFIG_THERMAL_GOV_STEP_WISE=y" >> Makefile
-              echo "    CONFIG_THERMAL_GOV_USER_SPACE=y" >> Makefile
-              echo "    CONFIG_QCOM_THERMAL=y" >> Makefile
-              echo "  FILES:=\$(LINUX_DIR)/drivers/thermal/thermal_core.ko" >> Makefile
-              echo "  FILES+=\$(LINUX_DIR)/drivers/thermal/thermal_sysfs.ko" >> Makefile
-              echo "  FILES+=\$(LINUX_DIR)/drivers/thermal/thermal_cooling_device.ko" >> Makefile
-              echo "  FILES+=\$(LINUX_DIR)/drivers/thermal/of-thermal.ko" >> Makefile
-              echo "  FILES+=\$(LINUX_DIR)/drivers/thermal/qcom/thermal.ko" >> Makefile
-              echo "  AUTOLOAD:=\$(call AutoLoad,30,thermal_core thermal_sysfs thermal_cooling_device of-thermal thermal)" >> Makefile
-              echo "endef" >> Makefile
-              echo "" >> Makefile
-              echo "define KernelPackage/thermal-qcom/description" >> Makefile
-              echo "  Kernel module for QCOM thermal management" >> Makefile
-              echo "endef" >> Makefile
-              echo "" >> Makefile
-              echo "include \$(INCLUDE_DIR)/kernel-defaults.mk" >> Makefile
-              echo "" >> Makefile
-              echo "define Build/Compile" >> Makefile
-              echo "  # 驱动已经在内核中，无需额外编译" >> Makefile
-              echo "endef" >> Makefile
-              echo "" >> Makefile
-              echo "\$(eval \$(call KernelPackage,thermal-qcom))" >> Makefile
-              
-              cd $OPENWRT_PATH
+              # 检查Lienol仓库是否已有此驱动
+              if grep -q "kmod-thermal-qcom" feeds/packages/Makefile; then
+                echo "✅ Lienol仓库已有kmod-thermal-qcom，尝试安装..."
+                ./scripts/feeds install kmod-thermal-qcom
+              else
+                # 如果没有，从官方仓库获取
+                echo "从OpenWrt官方仓库获取kmod-thermal-qcom..."
+                mkdir -p package/kernel/qca-thermal
+                cd package/kernel/qca-thermal
+                
+                # 创建Makefile，使用官方内核配置
+                echo "include \$(TOPDIR)/rules.mk" > Makefile
+                echo "include \$(INCLUDE_DIR)/kernel.mk" >> Makefile
+                echo "" >> Makefile
+                echo "PKG_NAME:=kmod-thermal-qcom" >> Makefile
+                echo "PKG_RELEASE:=1" >> Makefile
+                echo "" >> Makefile
+                echo "include \$(INCLUDE_DIR)/package.mk" >> Makefile
+                echo "" >> Makefile
+                echo "define KernelPackage/thermal-qcom" >> Makefile
+                echo "  SUBMENU:=Other modules" >> Makefile
+                echo "  TITLE:=QCOM Thermal driver" >> Makefile
+                echo "  DEPENDS:=+kmod-hwmon" >> Makefile
+                echo "  KCONFIG:=" >> Makefile
+                echo "    CONFIG_THERMAL=y" >> Makefile
+                echo "    CONFIG_THERMAL_OF=y" >> Makefile
+                echo "    CONFIG_THERMAL_GOV_FAIR_SHARE=y" >> Makefile
+                echo "    CONFIG_THERMAL_GOV_POWER_ALLOCATOR=y" >> Makefile
+                echo "    CONFIG_THERMAL_GOV_STEP_WISE=y" >> Makefile
+                echo "    CONFIG_THERMAL_GOV_USER_SPACE=y" >> Makefile
+                echo "    CONFIG_QCOM_THERMAL=y" >> Makefile
+                echo "  FILES:=\$(LINUX_DIR)/drivers/thermal/*.ko" >> Makefile
+                echo "  FILES+=\$(LINUX_DIR)/drivers/thermal/qcom/*.ko" >> Makefile
+                echo "  AUTOLOAD:=\$(call AutoLoad,30,thermal_core thermal_sysfs thermal_cooling_device of-thermal thermal)" >> Makefile
+                echo "endef" >> Makefile
+                echo "" >> Makefile
+                echo "define KernelPackage/thermal-qcom/description" >> Makefile
+                echo "  Kernel module for QCOM thermal management" >> Makefile
+                echo "endef" >> Makefile
+                echo "" >> Makefile
+                echo "include \$(INCLUDE_DIR)/kernel-defaults.mk" >> Makefile
+                echo "" >> Makefile
+                echo "define Build/Compile" >> Makefile
+                echo "  # 驱动已经在内核中，无需额外编译" >> Makefile
+                echo "endef" >> Makefile
+                echo "" >> Makefile
+                echo "\$(eval \$(call KernelPackage,thermal-qcom))" >> Makefile
+                
+                cd $OPENWRT_PATH
+              fi
             fi
           fi
         done
