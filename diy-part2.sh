@@ -7,12 +7,9 @@ sed -i 's/OpenWrt/JD-BE6500/g' package/base-files/files/bin/config_generate  # �
 sed -i 's/UTC/CST-8/g' package/base-files/files/bin/config_generate  # 设置时区为上海
 
 # 优化：修复重复添加主题的问题
-# 已在diy-part1中添加，此处无需重复
-# git clone https://github.com/jerrykuku/luci-theme-argon.git package/luci-theme-argon
 sed -i 's/luci-theme-bootstrap/luci-theme-argon/g' feeds/luci/collections/luci/Makefile
 
 # 调整无线驱动参数（针对IPQ5332）
-# 使用更准确的无线配置方式
 cat > package/kernel/mac80211/files/lib/wifi/mac80211.sh << EOF
 #!/bin/sh
 
@@ -35,6 +32,8 @@ set_wifi() {
   uci set wireless.\${section}.he_bandwidth=80
   uci set wireless.\${section}.he_su_beamformer=1
   uci set wireless.\${section}.he_su_beamformee=1
+  uci set wireless.\${section}.vht_beamformer=1
+  uci set wireless.\${section}.vht_beamformee=1
   
   uci -q delete wireless.\${section}_ap
   uci set wireless.\${section}_ap=wifi-iface
@@ -47,14 +46,12 @@ set_wifi() {
 }
 
 # 配置2.4G和5G
-set_wifi radio0 mt7622-2g 11
-set_wifi radio1 mt7622-5g auto
+set_wifi radio0 ipq5332-5g auto
+set_wifi radio1 ipq5332-2g 11
 EOF
 
 # 启用Turbo ACC网络加速（优化）
-# 移除已弃用的SFE选项
 sed -i 's/option flow_offload 0/option flow_offload 1/g' package/network/config/firewall/files/firewall.config
-sed -i '/option sfe 0/d' package/network/config/firewall/files/firewall.config
 
 # 添加常用软件包（优化：使用模块化方法）
 mkdir -p package/custom
@@ -83,6 +80,7 @@ CONFIG_PACKAGE_kmod-ath11k-ct=y  # IPQ5332 Wi-Fi驱动
 CONFIG_PACKAGE_ath11k-firmware-qca64=y  # IPQ5332 Wi-Fi固件
 CONFIG_PACKAGE_kmod-qca-ppe=y  # IPQ5332 PPE加速模块
 CONFIG_PACKAGE_luci-app-turboacc=y  # Turbo ACC网络加速
+CONFIG_PACKAGE_kmod-thermal-qcom=y  # IPQ5332温度管理
 EOF
 
 # 确保passwall依赖被正确识别
@@ -91,9 +89,9 @@ sed -i 's/DEPENDS:=\@LUCI/DEPENDS:=\@LUCI +chinadns-ng +dns2socks +tcping/g' pac
 # 优化系统参数（合并重复配置）
 cat > package/base-files/files/etc/sysctl.conf << EOF
 # 基础系统优化
-vm.min_free_kbytes=8192
+vm.min_free_kbytes=16384
 vm.swappiness=10
-fs.file-max=65536
+fs.file-max=131072
 
 # 网络优化
 net.core.default_qdisc=fq_codel
@@ -126,10 +124,6 @@ iptables -A INPUT -p icmp --icmp-type echo-request -j DROP
 iptables -t mangle -A PREROUTING -j CONNMARK --restore-mark
 iptables -t mangle -A POSTROUTING -j CONNMARK --save-mark
 EOF
-
-# 调整系统内存分配（针对1GB RAM设备）
-sed -i 's/CONFIG_DEFAULT_TARGET_OPTIMIZATION="-Os"/CONFIG_DEFAULT_TARGET_OPTIMIZATION="-O2"/g' .config
-sed -i 's/CONFIG_USE_MUSL_DYNAMIC_LINKER=y/# CONFIG_USE_MUSL_DYNAMIC_LINKER is not set/g' .config
 
 # 优化：修正分区设置（使用正确的IPQ5332分区）
 sed -i 's/64k/128k/g' target/linux/ipq807x/image/generic.mk  # 增大内核分区
