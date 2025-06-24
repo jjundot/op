@@ -1,6 +1,6 @@
 /dts-v1/;
 #include "qcom,ipq5332.dtsi"
-#include "ipq807x.dtsi"
+#include "ipq5332.dtsi"
 
 / {
     model = "JD BE6500";
