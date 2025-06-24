@@ -116,9 +116,11 @@ jobs:
         # IPQ5332专属驱动源（官方QCA仓库）
         echo "src-git qca https://git.openwrt.org/project/qca.git^openwrt-23.05" >> $FEEDS_CONF
         
-        # 添加kenzok8软件包源（包含常用软件）
+        # 添加第三方软件包源
         echo "src-git kenzo https://github.com/kenzok8/openwrt-packages" >> $FEEDS_CONF
         echo "src-git small https://github.com/kenzok8/small" >> $FEEDS_CONF
+        echo "src-git passwall https://github.com/xiaorouji/openwrt-passwall" >> $FEEDS_CONF
+        echo "src-git helloworld https://github.com/fw876/helloworld" >> $FEEDS_CONF
         
         echo "=== 最终Feeds配置 ==="
         cat $FEEDS_CONF
@@ -146,6 +148,16 @@ jobs:
         ./scripts/feeds install -a -p telephony -v
         ./scripts/feeds install -a -p wireless -v
         ./scripts/feeds install -a -p qca -v
+        
+        # 强制安装IPQ5332关键驱动
+        ./scripts/feeds install -f -p wireless kmod-ath11k-ct -v
+        ./scripts/feeds install -f -p wireless kmod-ath11k-firmware-qca64 -v
+        ./scripts/feeds install -f -p qca kmod-qca-nss-drv -v
+        ./scripts/feeds install -f -p qca kmod-qca-nss-gmac -v
+        ./scripts/feeds install -f -p qca kmod-qca-ppe -v
+        ./scripts/feeds install -f -p qca kmod-thermal-qcom -v
+        
+        # 安装第三方软件包
         ./scripts/feeds install -a -p kenzo -v
         ./scripts/feeds install -a -p small -v
         
@@ -222,8 +234,8 @@ jobs:
         echo "CONFIG_TARGET_IPQ807X=y" >> $CONFIG_FILE
         echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> $CONFIG_FILE
         echo "CONFIG_TARGET_DEVICE_PACKAGES_jd-be6500=\"kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom\"" >> $CONFIG_FILE
-        echo "CONFIG_TARGET_KERNEL_PARTSIZE=16" >> $CONFIG_FILE
-        echo "CONFIG_TARGET_ROOTFS_PARTSIZE=128" >> $CONFIG_FILE
+        echo "CONFIG_TARGET_KERNEL_PARTSIZE=32" >> $CONFIG_FILE
+        echo "CONFIG_TARGET_ROOTFS_PARTSIZE=256" >> $CONFIG_FILE
         
         echo "=== 当前.config 设备配置 ==="
         grep -E "CONFIG_TARGET_IPQ807X_DEVICE|CONFIG_TARGET_DEVICE_PACKAGES" .config
@@ -280,9 +292,10 @@ jobs:
           echo '  DEVICE_TITLE := JD BE6500 (IPQ5332)' >> "$MAKEFILE"
           echo '  DEVICE_DTS := qcom,ipq5332-jd-be6500' >> "$MAKEFILE"
           echo '  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom' >> "$MAKEFILE"
-          echo '  IMAGE_SIZE := 128m' >> "$MAKEFILE"
-          echo '  IMAGES := sysupgrade.bin' >> "$MAKEFILE"
+          echo '  IMAGE_SIZE := 256m' >> "$MAKEFILE"
+          echo '  IMAGES := sysupgrade.bin factory.bin' >> "$MAKEFILE"
           echo '  IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-to \$$(IMAGE_SIZE) | check-size \$$(IMAGE_SIZE)' >> "$MAKEFILE"
+          echo '  IMAGE/factory.bin := append-kernel | append-rootfs | pad-to \$$(IMAGE_SIZE) | check-size \$$(IMAGE_SIZE)' >> "$MAKEFILE"
           echo 'endef' >> "$MAKEFILE"
           echo 'TARGET_DEVICES += jd-be6500' >> "$MAKEFILE"
           
@@ -351,7 +364,9 @@ jobs:
             echo "💥 编译失败，收集错误日志..."
             mkdir -p error_logs
             cp compile_phase*.log error_logs/
-            cp $(find . -name "*.err" -or -name "*.log") error_logs/ 2>/dev/null
+            cp $(find . -name "*.err" -or -name "*.log" -or -name "*.rej") error_logs/ 2>/dev/null
+            cp .config error_logs/
+            cp target/linux/ipq807x/image/Makefile error_logs/
             tar -czf error_logs.tar.gz error_logs
             exit 1
           else
@@ -379,7 +394,7 @@ jobs:
           echo '  DEVICE_TITLE := JD BE6500 (IPQ5332)' >> "$MAKEFILE"
           echo '  DEVICE_DTS := qcom,ipq5332-jd-be6500' >> "$MAKEFILE"
           echo '  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom' >> "$MAKEFILE"
-          echo '  IMAGE_SIZE := 128m' >> "$MAKEFILE"
+          echo '  IMAGE_SIZE := 256m' >> "$MAKEFILE"
           echo '  IMAGES := sysupgrade.bin factory.bin' >> "$MAKEFILE"
           echo '  IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-to \$$(IMAGE_SIZE) | check-size \$$(IMAGE_SIZE)' >> "$MAKEFILE"
           echo '  IMAGE/factory.bin := append-kernel | append-rootfs | pad-to \$$(IMAGE_SIZE) | check-size \$$(IMAGE_SIZE)' >> "$MAKEFILE"
@@ -433,14 +448,13 @@ jobs:
       run: |
         cd $OPENWRT_PATH
         
-        # 尝试所有可能的路径组合
+        # 优先检查标准固件生成路径
         FIRMWARE_PATHS=(
+          "bin/targets/ipq807x/generic"  # 标准固件路径
+          "bin/targets/qcom/generic"
           "target/linux/ipq807x/generic"
           "target/linux/ipq5332/generic"
           "target/linux/qcom/generic"
-          "bin/targets/ipq807x/generic"
-          "bin/targets/qcom/generic"
-          "bin/targets/ipq807x/jd-be6500"
           "target"
           "bin"
         )
@@ -459,12 +473,6 @@ jobs:
         if [ -z "$FOUND_PATH" ]; then
           echo "❌ 未找到任何固件目录，可用路径:"
           find . -type d -name "bin" -o -name "ipq807x" -o -name "qcom" -o -name "generic"
-          
-          # 生成目录结构日志
-          mkdir -p dir_logs
-          find . -type d -name "bin" -o -name "ipq807x" -o -name "qcom" -o -name "generic" > dir_logs/dirs.txt
-          tar -czf dir_logs.tar.gz dir_logs
-          
           exit 1
         fi
         
@@ -472,15 +480,14 @@ jobs:
         echo "FIRMWARE_PATH=$FOUND_PATH" >> $GITHUB_ENV
         echo "firmware_path=$FOUND_PATH" >> $GITHUB_OUTPUT
         
-        # 模糊匹配关键固件文件
+        # 优化固件文件匹配模式（更通用的匹配）
         echo "检查固件文件..."
-        
-        # 定义模糊匹配模式
         FIRMWARE_PATTERNS=(
-          "*ipq*807x*generic*jd-be6500*squashfs-sysupgrade.bin"
-          "*ipq*807x*generic*jd-be6500*factory.bin"
-          "*ipq*5332*generic*jd-be6500*squashfs-sysupgrade.bin"
-          "*qcom*generic*jd-be6500*squashfs-sysupgrade.bin"
+          "*jd-be6500*squashfs-sysupgrade.bin"
+          "*jd-be6500*factory.bin"
+          "*ipq5332*squashfs-sysupgrade.bin"
+          "*ipq807x*squashfs-sysupgrade.bin"
+          "*qcom*squashfs-sysupgrade.bin"
           "*ipq*.bin"
         )
         
@@ -489,7 +496,6 @@ jobs:
         for pattern in "${FIRMWARE_PATTERNS[@]}"; do
           MATCHING_FILES=($(ls $FOUND_PATH/$pattern 2>/dev/null))
           if [ ${#MATCHING_FILES[@]} -gt 0 ]; then
-            # 保存固件名称和完整路径到变量
             FIRMWARE_NAME=${MATCHING_FILES[0]}
             FIRMWARE_FULL_PATH="$FOUND_PATH/${MATCHING_FILES[0]}"
             
@@ -504,9 +510,6 @@ jobs:
             echo "firmware_full_path=$FIRMWARE_FULL_PATH" >> $GITHUB_OUTPUT
             
             FOUND=true
-            
-            # 保存所有匹配的文件到环境变量
-            echo "ALL_FIRMWARE_FILES=$(IFS=,; echo "${MATCHING_FILES[*]}")" >> $GITHUB_ENV
             break
           fi
         done
@@ -514,12 +517,6 @@ jobs:
         if [ "$FOUND" = false ]; then
           echo "❌ 未找到任何匹配的固件文件，可用文件:"
           ls -lh $FOUND_PATH/*.bin || true
-          
-          # 生成文件列表日志
-          mkdir -p file_logs
-          ls -lh $FOUND_PATH/* > file_logs/files.txt
-          tar -czf file_logs.tar.gz file_logs
-          
           exit 1
         fi
 
