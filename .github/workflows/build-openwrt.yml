@@ -200,7 +200,7 @@ jobs:
               echo "尝试使用回退版本的ath11k驱动..."
               mkdir -p package/kernel/ath11k-ct
               
-              # 创建基本Makefile（使用echo替代cat << EOF）
+              # 创建基本Makefile
               echo 'include $(TOPDIR)/rules.mk' > package/kernel/ath11k-ct/Makefile
               echo 'include $(INCLUDE_DIR)/kernel.mk' >> package/kernel/ath11k-ct/Makefile
               echo '' >> package/kernel/ath11k-ct/Makefile
@@ -300,7 +300,7 @@ jobs:
           if [ -f "qcom,ipq5332-jd-be6500.dts" ]; then
             cp "qcom,ipq5332-jd-be6500.dts" "$DEVICE_TREE"
           else
-            # 生成设备树（使用echo替代cat << EOF）
+            # 生成设备树
             echo '/dts-v1/;' > "$DEVICE_TREE"
             echo '#include "qcom,ipq5332.dtsi"' >> "$DEVICE_TREE"
             echo '#include "ipq807x.dtsi"' >> "$DEVICE_TREE"
@@ -370,6 +370,73 @@ jobs:
           ./$DIY_P2_SH
         else
           echo "❌ 自定义脚本不存在: $DIY_P2_SH"
+        fi
+
+    - name: 清理可能的损坏包信息（新增步骤）
+      run: |
+        cd $OPENWRT_PATH
+        echo "清理可能的损坏包信息..."
+        
+        # 清理package索引缓存
+        rm -rf .package-lists/
+        
+        # 检查并清理损坏的Makefile
+        find package feeds -name "Makefile" -exec grep -q "^#" {} \; -exec echo "清理注释开头的Makefile: {}" \; -exec rm -f {} \; || true
+        
+        # 检查并修复package目录权限
+        chmod -R 755 package feeds
+        
+        # 重新初始化feeds
+        ./scripts/feeds clean
+        ./scripts/feeds install -a
+
+    - name: 收集包信息（带详细日志和错误处理）
+      run: |
+        cd $OPENWRT_PATH
+        echo "开始收集包信息..."
+        
+        # 创建详细日志目录
+        mkdir -p package_info_logs
+        
+        # 执行包信息收集，输出详细日志
+        ./scripts/feeds list > package_info_logs/feeds_list.log 2>&1
+        
+        # 收集包信息（使用单独的输出文件）
+        make defconfig V=s > package_info_logs/defconfig.log 2>&1
+        MAKE_STATUS=$?
+        
+        # 检查是否有错误
+        if [ $MAKE_STATUS -ne 0 ]; then
+          echo "❌ 收集包信息失败，分析错误..."
+          
+          # 提取关键错误信息
+          echo "=== 包信息收集错误摘要 ==="
+          grep -E "error:|fatal:|No such file or directory|cannot find|missing|failed" package_info_logs/defconfig.log || true
+          
+          # 检查是否有特定包导致问题
+          echo "=== 检查可能有问题的包 ==="
+          if grep -q "feeds/packages" package_info_logs/defconfig.log; then
+            echo "⚠️ 问题可能出在packages feed中"
+            # 尝试禁用可能有问题的包
+            echo "尝试禁用可能有问题的包..."
+            sed -i '/feeds\/packages\/utils\/yq/d' .config
+            sed -i '/feeds\/packages\/utils\/zsh/d' .config
+            # 重新尝试
+            make defconfig V=s > package_info_logs/defconfig_retry.log 2>&1
+            if [ $? -eq 0 ]; then
+              echo "✅ 禁用问题包后成功收集信息"
+            else
+              echo "❌ 仍然失败，保存完整日志"
+              tar -czf package_info_error.tar.gz package_info_logs
+              exit 1
+            fi
+          else
+            echo "❌ 无法确定具体问题包，保存完整日志"
+            tar -czf package_info_error.tar.gz package_info_logs
+            exit 1
+          fi
+        else
+          echo "✅ 包信息收集成功"
         fi
 
     - name: 下载依赖包（带缓存）
