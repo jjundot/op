@@ -96,58 +96,8 @@ chmod +x package/base-files/files/etc/init.d/hw_accel
 # ===== 系统性能优化 =====
 echo "配置系统性能优化..."
 # 调整系统参数
-cat > package/base-files/files/etc/sysctl.conf << EOF
-# 网络优化
-net.core.default_qdisc=fq_codel
-net.ipv4.tcp_congestion_control=bbr
-net.ipv4.tcp_syncookies=1
-net.ipv4.tcp_tw_reuse=1
-net.ipv4.tcp_fin_timeout=30
-net.ipv4.ip_local_port_range=1024 65535
-net.core.rmem_max=16777216
-net.core.wmem_max=16777216
-net.ipv4.tcp_rmem=4096 87380 16777216
-net.ipv4.tcp_wmem=4096 65536 16777216
 
-# 文件系统优化
-fs.file-max=131072
-fs.inotify.max_user_instances=8192
-
-# 内存优化
-vm.swappiness=10
-vm.vfs_cache_pressure=50
-vm.min_free_kbytes=16384
-EOF
-
-# ===== 添加luci-theme-argon主题 =====
-echo "添加Argon主题..."
-git clone -b 18.06 https://github.com/jerrykuku/luci-theme-argon.git package/luci-theme-argon
-git clone https://github.com/jerrykuku/luci-app-argon-config.git package/luci-app-argon-config
-
-# ===== 配置默认主题为Argon =====
-echo "配置默认主题..."
-cat > package/lean/default-settings/files/zzz-default-settings << EOF
-#!/bin/sh
-uci set luci.main.mediaurlbase='/luci-static/argon'
-uci commit luci
-exit 0
-EOF
-
-# ===== 调整防火墙规则 =====
-echo "优化防火墙规则..."
-cat > package/base-files/files/etc/firewall.user << EOF
-# 启用NAT加速
-echo 1 > /proc/sys/net/netfilter/nf_conntrack_tcp_be_liberal
-
-# 优化TCP连接跟踪
-echo 65536 > /sys/module/nf_conntrack/parameters/hashsize
-
-# 启用BBR拥塞控制
-echo "tcp_bbr" > /etc/modules-load.d/tcp-bbr.conf
-EOF
-
-# ===== IPQ5332温度管理 =====
-echo "配置IPQ5332温度管理..."
+# ===== 温度管理配置 =====
 cat > package/base-files/files/etc/thermal.conf << EOF
 # IPQ5332温度管理配置
 chip0 {
