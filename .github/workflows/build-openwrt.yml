@@ -165,12 +165,40 @@ jobs:
         
         # 确保IPQ5332驱动被安装
         if ! ./scripts/feeds list | grep -q "kmod-ath11k-ct"; then
-          echo "⚠️ 未找到IPQ5332 Wi-Fi驱动，手动添加..."
+          echo "⚠️ 未找到IPQ5332 Wi-Fi驱动，从OpenWrt官方仓库获取..."
           
-          # 修正：使用正确的Git仓库URL
-          git clone -b openwrt-23.05 https://github.com/openwrt/openwrt.git openwrt_temp
-          cp -r openwrt_temp/package/kernel/ath11k package/kernel/
-          rm -rf openwrt_temp
+          # 修正：直接克隆ath11k模块而非完整仓库
+          mkdir -p package/kernel
+          git clone -b openwrt-23.05 --depth=1 https://github.com/openwrt/openwrt.git openwrt_temp
+          
+          # 检查模块是否存在
+          if [ -d "openwrt_temp/package/kernel/ath11k" ]; then
+            cp -r openwrt_temp/package/kernel/ath11k package/kernel/
+            echo "✅ ath11k驱动已复制到package/kernel目录"
+          else
+            echo "❌ 未在临时仓库中找到ath11k模块"
+            echo "尝试从OpenWrt官方feed获取..."
+            git clone -b openwrt-23.05 --depth=1 https://git.openwrt.org/openwrt/openwrt.git openwrt_feed
+            if [ -d "openwrt_feed/package/kernel/ath11k" ]; then
+              cp -r openwrt_feed/package/kernel/ath11k package/kernel/
+              echo "✅ 从官方feed获取ath11k成功"
+            else
+              echo "❌ 无法获取ath11k驱动，尝试从其他源获取"
+              # 备选方案：直接从ath11k-ct项目获取
+              git clone -b master --depth=1 https://github.com/qca-open-wrt/ath11k-ct.git package/kernel/ath11k-ct
+              if [ -d "package/kernel/ath11k-ct" ]; then
+                echo "✅ 已获取ath11k-ct替代驱动"
+              else
+                echo "💥 所有方法均无法获取Wi-Fi驱动，构建终止"
+                exit 1
+              fi
+            fi
+          fi
+          
+          # 清理临时文件
+          rm -rf openwrt_temp openwrt_feed
+        else
+          echo "✅ IPQ5332 Wi-Fi驱动已安装"
         fi
 
     - name: 基础配置生成（保留并强化目标平台）
@@ -486,4 +514,4 @@ jobs:
         draft: false
         prerelease: false
       env:
-        GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}    
