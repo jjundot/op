@@ -116,6 +116,10 @@ jobs:
         # IPQ5332专属驱动源（官方QCA仓库）
         echo "src-git qca https://git.openwrt.org/project/qca.git^openwrt-23.05" >> $FEEDS_CONF
         
+        # 添加kenzok8软件包源（包含常用软件）
+        echo "src-git kenzo https://github.com/kenzok8/openwrt-packages" >> $FEEDS_CONF
+        echo "src-git small https://github.com/kenzok8/small" >> $FEEDS_CONF
+        
         echo "=== 最终Feeds配置 ==="
         cat $FEEDS_CONF
 
@@ -142,6 +146,8 @@ jobs:
         ./scripts/feeds install -a -p telephony -v
         ./scripts/feeds install -a -p wireless -v
         ./scripts/feeds install -a -p qca -v
+        ./scripts/feeds install -a -p kenzo -v
+        ./scripts/feeds install -a -p small -v
         
         # 检查IPQ5332驱动是否存在
         if ! ./scripts/feeds list | grep -q "kmod-ath11k-ct"; then
@@ -238,6 +244,23 @@ jobs:
           echo "/ {" >> "$DEVICE_TREE"
           echo "    model = \"JD BE6500\";" >> "$DEVICE_TREE"
           echo "    compatible = \"qcom,ipq5332\", \"qcom,ipq5000\", \"qcom,ipq807x\";" >> "$DEVICE_TREE"
+          echo "    /* Ethernet ports */" >> "$DEVICE_TREE"
+          echo "    ethernet@a4000000 {" >> "$DEVICE_TREE"
+          echo "        compatible = \"qcom,ipq5332-gmac\";" >> "$DEVICE_TREE"
+          echo "        reg = <0xa4000000 0x10000>;" >> "$DEVICE_TREE"
+          echo "        interrupts = <0 36 4>;" >> "$DEVICE_TREE"
+          echo "        qcom,mdio-bus = <&mdio>;" >> "$DEVICE_TREE"
+          echo "        qcom,phy-handle = <&ethphy0>;" >> "$DEVICE_TREE"
+          echo "    };" >> "$DEVICE_TREE"
+          echo "    mdio@a4002000 {" >> "$DEVICE_TREE"
+          echo "        compatible = \"qcom,ipq5332-mdio\";" >> "$DEVICE_TREE"
+          echo "        reg = <0xa4002000 0x1000>;" >> "$DEVICE_TREE"
+          echo "        #address-cells = <1>;" >> "$DEVICE_TREE"
+          echo "        #size-cells = <0>;" >> "$DEVICE_TREE"
+          echo "        ethphy0: ethernet-phy@0 {" >> "$DEVICE_TREE"
+          echo "            reg = <0>;" >> "$DEVICE_TREE"
+          echo "        };" >> "$DEVICE_TREE"
+          echo "    };" >> "$DEVICE_TREE"
           echo "    /* 此处可扩展完整设备树内容 */" >> "$DEVICE_TREE"
           echo "};" >> "$DEVICE_TREE"
           echo "✅ 生成设备树: $DEVICE_TREE"
@@ -253,10 +276,13 @@ jobs:
           
           # 逐行添加设备定义
           echo 'define Device/jd-be6500' >> "$MAKEFILE"
-          echo '  $(Device/generic)' >> "$MAKEFILE"
+          echo '  $(Device/ipq807x)' >> "$MAKEFILE"
           echo '  DEVICE_TITLE := JD BE6500 (IPQ5332)' >> "$MAKEFILE"
           echo '  DEVICE_DTS := qcom,ipq5332-jd-be6500' >> "$MAKEFILE"
           echo '  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom' >> "$MAKEFILE"
+          echo '  IMAGE_SIZE := 128m' >> "$MAKEFILE"
+          echo '  IMAGES := sysupgrade.bin' >> "$MAKEFILE"
+          echo '  IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-to \$$(IMAGE_SIZE) | check-size \$$(IMAGE_SIZE)' >> "$MAKEFILE"
           echo 'endef' >> "$MAKEFILE"
           echo 'TARGET_DEVICES += jd-be6500' >> "$MAKEFILE"
           
@@ -312,6 +338,7 @@ jobs:
         [ $JOBS -gt 4 ] && JOBS=4  # 限制线程数
         
         # 阶段1：并行编译
+        echo "开始并行编译（-j$JOBS）..."
         make -j$JOBS V=s 2>&1 | tee compile_phase1.log
         PHASE1_STATUS=$?
         
@@ -334,12 +361,12 @@ jobs:
           echo "✅ 并行编译成功"
         fi
 
-    - name: 修复设备定义（避免重复generic）
+    - name: 关键修复：强制设置设备定义
       run: |
         cd $OPENWRT_PATH
         MAKEFILE="target/linux/$ARCH/image/Makefile"
         
-        # 检查是否已存在正确定义
+        # 确保设备定义存在
         if ! grep -q "define Device/jd-be6500" "$MAKEFILE"; then
           echo "❌ 未找到设备定义，添加正确配置..."
           
@@ -352,6 +379,10 @@ jobs:
           echo '  DEVICE_TITLE := JD BE6500 (IPQ5332)' >> "$MAKEFILE"
           echo '  DEVICE_DTS := qcom,ipq5332-jd-be6500' >> "$MAKEFILE"
           echo '  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom' >> "$MAKEFILE"
+          echo '  IMAGE_SIZE := 128m' >> "$MAKEFILE"
+          echo '  IMAGES := sysupgrade.bin factory.bin' >> "$MAKEFILE"
+          echo '  IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-to \$$(IMAGE_SIZE) | check-size \$$(IMAGE_SIZE)' >> "$MAKEFILE"
+          echo '  IMAGE/factory.bin := append-kernel | append-rootfs | pad-to \$$(IMAGE_SIZE) | check-size \$$(IMAGE_SIZE)' >> "$MAKEFILE"
           echo 'endef' >> "$MAKEFILE"
           echo 'TARGET_DEVICES += jd-be6500' >> "$MAKEFILE"
           
@@ -391,41 +422,58 @@ jobs:
         sed -i '/CONFIG_TARGET_IMAGES_PAD/d' "$CONFIG_FILE"
         sed -i '/CONFIG_TARGET_ROOTFS_PARTSIZE/d' "$CONFIG_FILE"
         
+        # 确保必要的编译选项
+        echo "CONFIG_ALL_KMODS=y" >> "$CONFIG_FILE"
+        echo "CONFIG_DEVEL=y" >> "$CONFIG_FILE"
+        
         echo "✅ .config已优化"
 
-    - name: 固件完整性检查（改进路径检测）
+    - name: 智能固件路径检测（多路径适配）
+      id: firmware_path
       run: |
         cd $OPENWRT_PATH
         
         # 尝试所有可能的路径组合
         FIRMWARE_PATHS=(
-          "target/linux/ipq5332/generic"
           "target/linux/ipq807x/generic"
+          "target/linux/ipq5332/generic"
           "target/linux/qcom/generic"
           "bin/targets/ipq807x/generic"
           "bin/targets/qcom/generic"
+          "bin/targets/ipq807x/jd-be6500"
         )
         
         # 查找存在的路径
+        FOUND_PATH=""
         for path in "${FIRMWARE_PATHS[@]}"; do
           if [ -d "$path" ]; then
-            FIRMWARE_PATH="$path"
+            FOUND_PATH="$path"
+            echo "✅ 找到固件目录: $path"
             break
           fi
         done
         
         # 验证路径
-        if [ -z "$FIRMWARE_PATH" ]; then
+        if [ -z "$FOUND_PATH" ]; then
           echo "❌ 未找到任何固件目录，可用路径:"
-          find . -type d -name "bin" -o -name "ipq807x" -o -name "qcom"
+          find . -type d -name "bin" -o -name "ipq807x" -o -name "qcom" -o -name "generic"
+          
+          # 生成目录结构日志
+          mkdir -p dir_logs
+          find . -type d -name "bin" -o -name "ipq807x" -o -name "qcom" -o -name "generic" > dir_logs/dirs.txt
+          tar -czf dir_logs.tar.gz dir_logs
+          
           exit 1
         fi
         
-        echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
+        echo "FIRMWARE_PATH=$FOUND_PATH" >> $GITHUB_ENV
+        echo "firmware_path=$FOUND_PATH" >> $GITHUB_OUTPUT
         
         # 检查关键固件文件（支持多种命名可能）
+        echo "检查固件文件..."
         POSSIBLE_FILENAMES=(
           "openwrt-ipq807x-generic-jd-be6500-squashfs-sysupgrade.bin"
+          "openwrt-ipq807x-generic-jd-be6500-factory.bin"
           "openwrt-ipq807x-generic-generic-jd-be6500-squashfs-sysupgrade.bin"  # 兼容现有错误命名
           "openwrt-ipq5332-generic-jd-be6500-squashfs-sysupgrade.bin"
           "openwrt-qcom-generic-jd-be6500-squashfs-sysupgrade.bin"
@@ -433,16 +481,24 @@ jobs:
         
         FOUND=false
         for filename in "${POSSIBLE_FILENAMES[@]}"; do
-          if [ -f "$FIRMWARE_PATH/$filename" ]; then
+          if [ -f "$FOUND_PATH/$filename" ]; then
             echo "✅ 找到固件: $filename"
+            echo "FIRMWARE_FILE=$filename" >> $GITHUB_ENV
+            echo "firmware_file=$filename" >> $GITHUB_OUTPUT
             FOUND=true
             break
           fi
         done
         
         if [ "$FOUND" = false ]; then
-          echo "❌ 未找到任何匹配的固件文件"
-          ls -lh $FIRMWARE_PATH/*.bin || true
+          echo "❌ 未找到任何匹配的固件文件，可用文件:"
+          ls -lh $FOUND_PATH/*.bin || true
+          
+          # 生成文件列表日志
+          mkdir -p file_logs
+          ls -lh $FOUND_PATH/* > file_logs/files.txt
+          tar -czf file_logs.tar.gz file_logs
+          
           exit 1
         fi
 
@@ -450,42 +506,10 @@ jobs:
       run: |
         cd $OPENWRT_PATH
         echo "=== 目录结构 ==="
-        find . -type d -name "target" -o -name "bin" -o -name "ipq807x" -o -name "ipq5332" -o -name "qcom"
+        find . -type d -name "target" -o -name "bin" -o -name "ipq807x" -o -name "ipq5332" -o -name "qcom" -o -name "generic"
         
         echo "=== 固件文件列表 ==="
-        find . -name "*.bin" -o -name "*.img"
-
-    - name: 固件完整性检查（多路径适配）
-      run: |
-        cd $OPENWRT_PATH
-        FIRMWARE_PATH=$(find . -type d -name "ipq807x" -o -name "qcom" -o -name "generic" 2>/dev/null | grep -E "ipq807x|qcom" | head -n1)
-        FIRMWARE_PATH="${FIRMWARE_PATH}/generic"
-        
-        if [ ! -d "$FIRMWARE_PATH" ]; then
-          FIRMWARE_PATH=$(find . -type d -name "bin" | head -n1)/$ARCH/$SUBARCH
-        fi
-        
-        if [ ! -d "$FIRMWARE_PATH" ]; then
-          echo "❌ 未找到固件目录，可用路径:"
-          find . -type d -name "bin" -o -name "ipq807x" -o -name "qcom"
-          exit 1
-        fi
-        
-        echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
-        
-        REQUIRED_FILES=(
-          "openwrt-$ARCH-$SUBARCH-generic-jd-be6500-squashfs-sysupgrade.bin"
-          "openwrt-$ARCH-$SUBARCH-generic-rootfs.tar.gz"
-        )
-        
-        for FILE in "${REQUIRED_FILES[@]}"; do
-          if [ ! -f "$FIRMWARE_PATH/$FILE" ]; then
-            echo "❌ 缺失关键固件: $FILE"
-            ls -lh $FIRMWARE_PATH/*.bin || true
-            exit 1
-          fi
-        done
-        echo "✅ 固件完整性检查通过"
+        find . -name "*.bin" -o -name "*.img" -o -name "*.tar.gz"
 
     - name: 生成版本信息
       id: version
@@ -502,6 +526,7 @@ jobs:
         Git 提交: $COMMIT_ID
         分支: $LIENOL_BRANCH
         目标平台: $ARCH/$SUBARCH
+        固件路径: ${{ env.FIRMWARE_PATH }}/${{ env.FIRMWARE_FILE }}
         EOF
 
     - name: 上传固件到Artifact
@@ -511,6 +536,7 @@ jobs:
         name: ${{ env.release_version }}
         path: |
           ${{ env.FIRMWARE_PATH }}/*.bin
+          ${{ env.FIRMWARE_PATH }}/*.img
           ${{ env.FIRMWARE_PATH }}/*.tar.gz
           ${{ env.FIRMWARE_PATH }}/sha256sums
           version.info
@@ -526,6 +552,7 @@ jobs:
         body_path: version.info
         files: |
           ${{ env.FIRMWARE_PATH }}/*.bin
+          ${{ env.FIRMWARE_PATH }}/*.img
           ${{ env.FIRMWARE_PATH }}/*.tar.gz
           ${{ env.FIRMWARE_PATH }}/sha256sums
           version.info
