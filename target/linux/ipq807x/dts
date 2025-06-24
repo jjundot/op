@@ -1,63 +1,300 @@
-# qcom,ipq5332-jd-be6500.dts
 /dts-v1/;
 #include "qcom,ipq5332.dtsi"
 #include "ipq807x.dtsi"
 
 / {
-  model = "JD BE6500";
-  compatible = "qcom,ipq5332", "qcom,ipq5000", "qcom,ipq807x";
-
-  chosen {
-    bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";
-  };
-
-  memory@80000000 {
-    device_type = "memory";
-    reg = <0x80000000 0x40000000>; /* 1GB */
-  };
-
-  # 网络设备配置
-  ethernet@1a10000 {
-    compatible = "qcom,ipq8074-gmac", "qcom,ipq8064-gmac";
-    reg = <0x1a10000 0x10000>;
-    interrupts = <0 42 4>;
-    qcom,phy-handle = <&switch0_phy0>;
-    qcom,mdio-bus = <&mdio>;
-    qcom,port-id = <0>;
-    qcom,rxq-pool = <0>;
-    qcom,txq-pool = <0>;
-    qcom,ptp-clock = <0>;
-  };
-
-  mdio@1a14000 {
-    compatible = "qcom,ipq8074-mdio";
-    reg = <0x1a14000 0x1000>;
-    #address-cells = <1>;
-    #size-cells = <0>;
-
-    switch0_phy0: phy@0 {
-      reg = <0>;
-      compatible = "ethernet-phy-ieee802.3-c22";
+    model = "JD BE6500";
+    compatible = "qcom,ipq5332", "qcom,ipq5000", "qcom,ipq807x";
+    interrupt-parent = <&gic>;
+    
+    chosen {
+        bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8 rootfstype=squashfs,jffs2";
     };
-  };
 
-  # USB3.0配置
-  usb@fe980000 {
-    compatible = "qcom,ipq8074-dwc3";
-    reg = <0xfe980000 0x10000>;
-    interrupts = <0 90 4>;
-    clocks = <&gcc GCC_DWC3_CLK>, <&gcc GCC_DWC3_AHB_CLK>;
-    clock-names = "bus", "ahb";
-    qcom,tx-fifo-size = <0x400>;
-    qcom,max-speed = <5>; /* 5Gbps */
-    status = "okay";
-  };
+    memory@80000000 {
+        device_type = "memory";
+        reg = <0x80000000 0x40000000>; /* 1GB */
+    };
 
-  # 温度传感器配置
-  thermal@1a00000 {
-    compatible = "qcom,pm8998-thermal";
-    reg = <0x1a00000 0x1000>;
-    interrupts = <0 12 0>;
-    status = "okay";
-  };
+    /* 时钟配置 */
+    clocks {
+        #clock-cells = <1>;
+        
+        ref-clk: ref-clock {
+            compatible = "fixed-clock";
+            #clock-cells = <0>;
+            clock-frequency = <25000000>;
+            clock-output-names = "ref_clk";
+        };
+    };
+
+    /* GPIO控制器 */
+    gpio@1b00000 {
+        compatible = "qcom,ipq8074-gpio";
+        reg = <0x1b00000 0x10000>;
+        #gpio-cells = <2>;
+        interrupt-controller;
+        #interrupt-cells = <2>;
+        interrupts = <0 32 4>;
+        status = "okay";
+    };
+
+    /* 以太网控制器 */
+    ethernet@1a10000 {
+        compatible = "qcom,ipq8074-gmac", "qcom,ipq8064-gmac";
+        reg = <0x1a10000 0x10000>;
+        interrupts = <0 42 4>;
+        qcom,phy-handle = <&switch0_phy0>;
+        qcom,mdio-bus = <&mdio>;
+        qcom,port-id = <0>;
+        qcom,rxq-pool = <0>;
+        qcom,txq-pool = <0>;
+        qcom,ptp-clock = <0>;
+        qcom,mac-address = [00 11 22 33 44 55];
+        qcom,enable-vlan = <1>;
+        qcom,mtu = <9000>; /* 支持巨型帧 */
+        status = "okay";
+    };
+
+    /* MDIO总线和PHY */
+    mdio@1a14000 {
+        compatible = "qcom,ipq8074-mdio";
+        reg = <0x1a14000 0x1000>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+        
+        switch0_phy0: phy@0 {
+            reg = <0>;
+            compatible = "ethernet-phy-ieee802.3-c22";
+            phy-mode = "rgmii";
+            qcom,rx-delay = <0>;
+            qcom,tx-delay = <0>;
+        };
+    };
+
+    /* USB3.0控制器 */
+    usb@fe980000 {
+        compatible = "qcom,ipq8074-dwc3";
+        reg = <0xfe980000 0x10000>;
+        interrupts = <0 90 4>;
+        clocks = <&gcc GCC_DWC3_CLK>, <&gcc GCC_DWC3_AHB_CLK>;
+        clock-names = "bus", "ahb";
+        qcom,tx-fifo-size = <0x400>;
+        qcom,max-speed = <5>; /* 5Gbps */
+        dr_mode = "host";
+        phys = <&usb3_phy 0>;
+        phy-names = "usb3-phy";
+        qcom,usb3-phy = <&usb3_phy>;
+        status = "okay";
+    };
+
+    /* USB3.0 PHY */
+    usb3_phy: usb3-phy@fe9c0000 {
+        compatible = "qcom,ipq8074-usb3-phy";
+        reg = <0xfe9c0000 0x10000>;
+        clocks = <&gcc GCC_USB3_PHY_CORE_CLK>,
+                 <&gcc GCC_USB3_PHY_REF_CLK>;
+        clock-names = "core", "ref";
+        status = "okay";
+    };
+
+    /* 看门狗定时器 */
+    watchdog@1a08000 {
+        compatible = "qcom,ipq8074-watchdog";
+        reg = <0x1a08000 0x1000>;
+        interrupts = <0 28 4>;
+        clocks = <&gcc GCC_WDT_CLK>;
+        timeout-sec = <30>; /* 30秒超时 */
+        status = "okay";
+    };
+
+    /* NAND闪存控制器 */
+    nand@1a30000 {
+        compatible = "qcom,ipq8074-nand";
+        reg = <0x1a30000 0x10000>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+        interrupts = <0 46 4>;
+        clocks = <&gcc GCC_NAND_CLK>;
+        clock-names = "nand";
+        status = "okay";
+        
+        nand-controller {
+            #address-cells = <1>;
+            #size-cells = <1>;
+            nand-on-flash-bbt;
+            nand-ecc-mode = "hw";
+            nand-ecc-strength = <4>;
+            nand-bus-width = <8>;
+            nand-cle-offset = <0x10>;
+            nand-ale-offset = <0x14>;
+            nand-data-offset = <0x0>;
+            nand-write-delay = <10>;
+            nand-read-delay = <10>;
+        };
+    };
+
+    /* WiFi控制器 - 调整为双频/三频支持 (2.4G + 5.2G + 5.8G) */
+    wifi@0 {
+        compatible = "qcom,ipq5332-wifi";
+        reg = <0>;
+        interrupts = <0 70 4>;
+        qcom,wifi-cal-data = <&wifi_cal_data>;
+        qcom,band-2g = <&wifi_2g>;
+        qcom,band-5g-low = <&wifi_5g_low>;  /* 5.2G频段 */
+        qcom,band-5g-high = <&wifi_5g_high>; /* 5.8G频段 */
+        status = "okay";
+    };
+
+    wifi_cal_data: wifi-cal-data {
+        compatible = "qcom,ipq5332-wifi-cal-data";
+        /* 校准数据通常从硬件获取 */
+    };
+
+    wifi_2g: band-2g {
+        channel-width = <40>;
+        tx-power = <20>; /* dBm */
+        antenna-gain = <3>; /* dBi */
+    };
+
+    wifi_5g_low: band-5g-low {
+        channel-width = <160>;
+        tx-power = <23>; /* dBm */
+        antenna-gain = <5>; /* dBi */
+        channel-range-start = <36>;
+        channel-range-end = <64>;
+    };
+
+    wifi_5g_high: band-5g-high {
+        channel-width = <160>;
+        tx-power = <23>; /* dBm */
+        antenna-gain = <5>; /* dBi */
+        channel-range-start = <100>;
+        channel-range-end = <165>;
+    };
+
+    /* PCIe控制器 - 连接WiFi */
+    pcie@fe800000 {
+        compatible = "qcom,ipq8074-pcie";
+        reg = <0xfe800000 0x100000>;
+        #address-cells = <3>;
+        #size-cells = <2>;
+        device_type = "pci";
+        interrupts = <0 60 4>, <0 61 4>, <0 62 4>, <0 63 4>;
+        interrupt-map-mask = <0 0 0 0xf>;
+        interrupt-map = <0 0 0 1 &gic 0 60 4>,
+                        <0 0 0 2 &gic 0 61 4>,
+                        <0 0 0 3 &gic 0 62 4>,
+                        <0 0 0 4 &gic 0 63 4>;
+        bus-range = <0 255>;
+        status = "okay";
+        
+        pcie-port@0 {
+            reg = <0 0 0 0 0>;
+            #address-cells = <3>;
+            #size-cells = <2>;
+            device_type = "pci";
+            status = "okay";
+        };
+    };
+
+    /* 温度传感器 */
+    thermal@1a00000 {
+        compatible = "qcom,pm8998-thermal";
+        reg = <0x1a00000 0x1000>;
+        interrupts = <0 12 0>;
+        status = "okay";
+    };
+
+    /* 电源管理 */
+    pmic@1a00000 {
+        compatible = "qcom,pm8998";
+        reg = <0x1a00000 0x10000>;
+        interrupts = <0 10 4>;
+        #power-domain-cells = <1>;
+        status = "okay";
+    };
+
+    /* LED控制器 */
+    leds {
+        compatible = "gpio-leds";
+        
+        power: led-power {
+            label = "power";
+            gpios = <&gpio 16 0>; /* GPIO16 */
+            default-state = "on";
+            linux,default-trigger = "heartbeat";
+        };
+        
+        wifi-2g: led-wifi-2g {
+            label = "wifi-2g";
+            gpios = <&gpio 17 0>; /* GPIO17 */
+            default-state = "off";
+            linux,default-trigger = "phy0txinuse";
+        };
+        
+        wifi-5g: led-wifi-5g {
+            label = "wifi-5g";
+            gpios = <&gpio 18 0>; /* GPIO18 */
+            default-state = "off";
+            linux,default-trigger = "phy1txinuse";
+        };
+        
+        wan: led-wan {
+            label = "wan";
+            gpios = <&gpio 20 0>; /* GPIO20 */
+            default-state = "off";
+            linux,default-trigger = "netdev-transmit";
+        };
+        
+        lan1: led-lan1 {
+            label = "lan1";
+            gpios = <&gpio 21 0>; /* GPIO21 */
+            default-state = "off";
+            linux,default-trigger = "netdev-transmit";
+        };
+        
+        lan2: led-lan2 {
+            label = "lan2";
+            gpios = <&gpio 22 0>; /* GPIO22 */
+            default-state = "off";
+            linux,default-trigger = "netdev-transmit";
+        };
+        
+        lan3: led-lan3 {
+            label = "lan3";
+            gpios = <&gpio 23 0>; /* GPIO23 */
+            default-state = "off";
+            linux,default-trigger = "netdev-transmit";
+        };
+        
+        lan4: led-lan4 {
+            label = "lan4";
+            gpios = <&gpio 24 0>; /* GPIO24 */
+            default-state = "off";
+            linux,default-trigger = "netdev-transmit";
+        };
+    };
+
+    /* 按钮控制器 */
+    buttons {
+        compatible = "gpio-keys";
+        #address-cells = <1>;
+        #size-cells = <0>;
+        
+        reset: button@0 {
+            label = "reset";
+            gpios = <&gpio 32 0>; /* GPIO32 */
+            linux,code = <116>; /* KEY_POWER */
+            debounce-interval = <50>;
+            wakeup-source;
+        };
+        
+        wps: button@1 {
+            label = "wps";
+            gpios = <&gpio 33 0>; /* GPIO33 */
+            linux,code = <247>; /* KEY_WPS_BUTTON */
+            debounce-interval = <50>;
+        };
+    };
 };
