@@ -220,17 +220,15 @@ jobs:
             cp "qcom,ipq5332-jd-be6500.dts" "$DEVICE_TREE"
           else
             # 生成设备树（此处使用简化版本，实际应使用完整设备树）
-            cat > "$DEVICE_TREE" << 'EOF'
-/dts-v1/;
-#include "qcom,ipq5332.dtsi"
-#include "ipq807x.dtsi"
-
-/ {
-    model = "JD BE6500";
-    compatible = "qcom,ipq5332", "qcom,ipq5000", "qcom,ipq807x";
-    # 简化设备树内容，实际应使用完整配置
-};
-EOF
+            echo '/dts-v1/;' > "$DEVICE_TREE"
+            echo '#include "qcom,ipq5332.dtsi"' >> "$DEVICE_TREE"
+            echo '#include "ipq807x.dtsi"' >> "$DEVICE_TREE"
+            echo '' >> "$DEVICE_TREE"
+            echo '/ {' >> "$DEVICE_TREE"
+            echo '    model = "JD BE6500";' >> "$DEVICE_TREE"
+            echo '    compatible = "qcom,ipq5332", "qcom,ipq5000", "qcom,ipq807x";' >> "$DEVICE_TREE"
+            echo '    # 简化设备树内容，实际应使用完整配置' >> "$DEVICE_TREE"
+            echo '};' >> "$DEVICE_TREE"
           fi
           echo "设备树已生成: $DEVICE_TREE"
         else
@@ -249,25 +247,23 @@ EOF
           sed -i "/define Device/generic/a\ \ \ \ \ DEVICE_PACKAGES += kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom" "$MAKEFILE"
           sed -i "/endef/a\ \ \ \ \ DEVICE_DTS := qcom,ipq5332-jd-be6500" "$MAKEFILE"
           
-          if grep -q "qcom,ipq5332-jd-be6500" "$MAKEFILE"; then
-            echo "✅ 设备树已添加到Makefile"
-          else
+          if ! grep -q "qcom,ipq5332-jd-be6500" "$MAKEFILE"; then
             # 如果sed失败，使用追加方式
             echo "" >> "$MAKEFILE"
             echo "define Device/jd-be6500" >> "$MAKEFILE"
-            echo "  $(Device/generic)" >> "$MAKEFILE"
+            echo "  \$(Device/generic)" >> "$MAKEFILE"
             echo "  DEVICE_TITLE := JD BE6500 (IPQ5332)" >> "$MAKEFILE"
             echo "  DEVICE_DTS := qcom,ipq5332-jd-be6500" >> "$MAKEFILE"
             echo "  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom" >> "$MAKEFILE"
             echo "endef" >> "$MAKEFILE"
             echo "\$(eval \$(call Device,jd-be6500))" >> "$MAKEFILE"
-            
-            if grep -q "jd-be6500" "$MAKEFILE"; then
-              echo "✅ 设备树已添加到Makefile"
-            else
-              echo "❌ 设备树添加失败"
-              exit 1
-            fi
+          fi
+          
+          if grep -q "jd-be6500" "$MAKEFILE"; then
+            echo "✅ 设备树已添加到Makefile"
+          else
+            echo "❌ 设备树添加失败"
+            exit 1
           fi
         else
           echo "✅ 设备树已被Makefile识别"
