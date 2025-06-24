@@ -39,8 +39,10 @@ config wifi-device 'radio0'
   option path 'pci0000:00/0000:00:00.0'
   option band '5GHz'
   option channel 'auto'
-  option hwmode '11a'
+  option hwmode '11ax'
   option htmode 'VHT80'
+  option he_gi='1600ns'
+  option he_mcs='11'
   option country 'CN'
   option txpower '23'
   option disabled '0'
@@ -59,7 +61,7 @@ config wifi-device 'radio1'
   option path 'pci0000:00/0000:00:01.0'
   option band '2.4GHz'
   option channel 'auto'
-  option hwmode '11g'
+  option hwmode '11ax'
   option htmode 'HT40+'
   option country 'CN'
   option txpower '20'
@@ -91,25 +93,12 @@ start() {
 EOF
 chmod +x package/base-files/files/etc/init.d/hw_accel
 
-# ===== Docker配置优化 =====
-echo "配置Docker环境..."
-mkdir -p package/base-files/files/etc/config
-cat > package/base-files/files/etc/config/docker << EOF
-config docker
-  option storage_driver 'overlay2'
-  option log_driver 'json-file'
-  option log_max_size '10m'
-  option log_max_file '3'
-  option data_root '/mnt/docker'
-  option registry_mirror 'https://registry.docker-cn.com'
-EOF
-
 # ===== 系统性能优化 =====
 echo "配置系统性能优化..."
 # 调整系统参数
 cat > package/base-files/files/etc/sysctl.conf << EOF
 # 网络优化
-net.core.default_qdisc=fq
+net.core.default_qdisc=fq_codel
 net.ipv4.tcp_congestion_control=bbr
 net.ipv4.tcp_syncookies=1
 net.ipv4.tcp_tw_reuse=1
@@ -121,12 +110,13 @@ net.ipv4.tcp_rmem=4096 87380 16777216
 net.ipv4.tcp_wmem=4096 65536 16777216
 
 # 文件系统优化
-fs.file-max=65535
+fs.file-max=131072
 fs.inotify.max_user_instances=8192
 
 # 内存优化
 vm.swappiness=10
 vm.vfs_cache_pressure=50
+vm.min_free_kbytes=16384
 EOF
 
 # ===== 添加luci-theme-argon主题 =====
@@ -151,6 +141,20 @@ echo 1 > /proc/sys/net/netfilter/nf_conntrack_tcp_be_liberal
 
 # 优化TCP连接跟踪
 echo 65536 > /sys/module/nf_conntrack/parameters/hashsize
+
+# 启用BBR拥塞控制
+echo "tcp_bbr" > /etc/modules-load.d/tcp-bbr.conf
+EOF
+
+# ===== IPQ5332温度管理 =====
+echo "配置IPQ5332温度管理..."
+cat > package/base-files/files/etc/thermal.conf << EOF
+# IPQ5332温度管理配置
+chip0 {
+    trip_point_0 = 75
+    trip_point_1 = 85
+    trip_point_2 = 95
+}
 EOF
 
 echo "IPQ5332编译前优化完成"
