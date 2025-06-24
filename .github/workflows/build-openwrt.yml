@@ -497,12 +497,12 @@ jobs:
         echo "release_version=OpenWrt_${RELEASE_DATE}_${COMMIT_ID}" >> $GITHUB_OUTPUT
         
         cat <<EOF > version.info
-OpenWrt 固件 for JD BE6500 (IPQ5332)
-编译时间: $(date +"%Y-%m-%d %H:%M:%S")
-Git 提交: $COMMIT_ID
-分支: $LIENOL_BRANCH
-目标平台: $ARCH/$SUBARCH
-EOF
+        OpenWrt 固件 for JD BE6500 (IPQ5332)
+        编译时间: $(date +"%Y-%m-%d %H:%M:%S")
+        Git 提交: $COMMIT_ID
+        分支: $LIENOL_BRANCH
+        目标平台: $ARCH/$SUBARCH
+        EOF
 
     - name: 上传固件到Artifact
       if: env.UPLOAD_FIRMWARE == 'true'
