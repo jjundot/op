@@ -428,7 +428,6 @@ jobs:
         
         echo "✅ .config已优化"
 
-       # 优化后的智能固件路径检测步骤
     - name: 智能固件路径检测（多路径适配+模糊匹配）
       id: firmware_path
       run: |
@@ -469,6 +468,7 @@ jobs:
           exit 1
         fi
         
+        # 保存路径到环境变量
         echo "FIRMWARE_PATH=$FOUND_PATH" >> $GITHUB_ENV
         echo "firmware_path=$FOUND_PATH" >> $GITHUB_OUTPUT
         
@@ -489,9 +489,20 @@ jobs:
         for pattern in "${FIRMWARE_PATTERNS[@]}"; do
           MATCHING_FILES=($(ls $FOUND_PATH/$pattern 2>/dev/null))
           if [ ${#MATCHING_FILES[@]} -gt 0 ]; then
-            echo "✅ 找到匹配的固件文件: ${MATCHING_FILES[0]}"
-            echo "FIRMWARE_FILE=${MATCHING_FILES[0]}" >> $GITHUB_ENV
-            echo "firmware_file=${MATCHING_FILES[0]}" >> $GITHUB_OUTPUT
+            # 保存固件名称和完整路径到变量
+            FIRMWARE_NAME=${MATCHING_FILES[0]}
+            FIRMWARE_FULL_PATH="$FOUND_PATH/${MATCHING_FILES[0]}"
+            
+            echo "✅ 找到匹配的固件文件: $FIRMWARE_NAME"
+            echo "固件名称: $FIRMWARE_NAME"
+            echo "固件路径: $FIRMWARE_FULL_PATH"
+            
+            # 保存到环境变量
+            echo "FIRMWARE_NAME=$FIRMWARE_NAME" >> $GITHUB_ENV
+            echo "FIRMWARE_FULL_PATH=$FIRMWARE_FULL_PATH" >> $GITHUB_ENV
+            echo "firmware_name=$FIRMWARE_NAME" >> $GITHUB_OUTPUT
+            echo "firmware_full_path=$FIRMWARE_FULL_PATH" >> $GITHUB_OUTPUT
+            
             FOUND=true
             
             # 保存所有匹配的文件到环境变量
@@ -509,6 +520,22 @@ jobs:
           ls -lh $FOUND_PATH/* > file_logs/files.txt
           tar -czf file_logs.tar.gz file_logs
           
+          exit 1
+        fi
+
+    - name: 验证固件存在
+      run: |
+        cd $OPENWRT_PATH
+        
+        # 使用保存的变量验证固件
+        if [ -f "${{ env.FIRMWARE_FULL_PATH }}" ]; then
+          echo "✅ 固件存在: ${{ env.FIRMWARE_FULL_PATH }}"
+          echo "固件大小: $(du -h ${{ env.FIRMWARE_FULL_PATH }} | cut -f1)"
+          echo "固件SHA256校验和: $(sha256sum ${{ env.FIRMWARE_FULL_PATH }} | cut -d' ' -f1)"
+        else
+          echo "❌ 固件不存在: ${{ env.FIRMWARE_FULL_PATH }}"
+          echo "可用文件:"
+          ls -lh ${{ env.FIRMWARE_PATH }}/*.bin || true
           exit 1
         fi
 
@@ -536,7 +563,10 @@ jobs:
         Git 提交: $COMMIT_ID
         分支: $LIENOL_BRANCH
         目标平台: $ARCH/$SUBARCH
-        固件路径: ${{ env.FIRMWARE_PATH }}/${{ env.FIRMWARE_FILE }}
+        固件名称: ${{ env.FIRMWARE_NAME }}
+        固件完整路径: ${{ env.FIRMWARE_FULL_PATH }}
+        固件大小: $(du -h ${{ env.FIRMWARE_FULL_PATH }} | cut -f1)
+        固件SHA256校验和: $(sha256sum ${{ env.FIRMWARE_FULL_PATH }} | cut -d' ' -f1)
         EOF
 
     - name: 上传固件到Artifact
@@ -545,13 +575,17 @@ jobs:
       with:
         name: ${{ env.release_version }}
         path: |
-          ${{ env.FIRMWARE_PATH }}/*.bin
+          ${{ env.FIRMWARE_FULL_PATH }}
           ${{ env.FIRMWARE_PATH }}/*.img
           ${{ env.FIRMWARE_PATH }}/*.tar.gz
           ${{ env.FIRMWARE_PATH }}/sha256sums
           version.info
         retention-days: 30
         if-no-files-found: error
+      env:
+        FIRMWARE_PATH: ${{ env.FIRMWARE_PATH }}
+        FIRMWARE_NAME: ${{ env.FIRMWARE_NAME }}
+        FIRMWARE_FULL_PATH: ${{ env.FIRMWARE_FULL_PATH }}
 
     - name: 发布到GitHub Release
       if: env.UPLOAD_RELEASE == 'true' && github.event_name == 'release'
@@ -561,12 +595,13 @@ jobs:
         tag_name: ${{ env.release_version }}
         body_path: version.info
         files: |
-          ${{ env.FIRMWARE_PATH }}/*.bin
-          ${{ env.FIRMWARE_PATH }}/*.img
-          ${{ env.FIRMWARE_PATH }}/*.tar.gz
+          ${{ env.FIRMWARE_FULL_PATH }}
           ${{ env.FIRMWARE_PATH }}/sha256sums
           version.info
         draft: false
         prerelease: false
       env:
         GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}
+        FIRMWARE_PATH: ${{ env.FIRMWARE_PATH }}
+        FIRMWARE_NAME: ${{ env.FIRMWARE_NAME }}
+        FIRMWARE_FULL_PATH: ${{ env.FIRMWARE_FULL_PATH }}
