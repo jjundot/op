@@ -460,7 +460,7 @@ jobs:
 
     - name: 固件完整性检查（多级路径检测）
       run: |
-        cd $OPENWRT_PATH/bin
+        cd $OPENWRT_PATH
         # 优先检测ipq807x目标（三级路径检测）
         IPQ807X_DIR=$(find . -type d -name "ipq807x" 2>/dev/null | head -n1)
         if [ -z "$IPQ807X_DIR" ]; then
