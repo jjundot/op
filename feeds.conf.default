@@ -1,0 +1,3 @@
+src-git qca https://git.openwrt.org/project/qca.git^openwrt-23.05
+src-git kenzo https://github.com/kenzok8/openwrt-packages
+src-git small https://github.com/kenzok8/small
