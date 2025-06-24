@@ -428,7 +428,8 @@ jobs:
         
         echo "✅ .config已优化"
 
-    - name: 智能固件路径检测（多路径适配）
+       # 优化后的智能固件路径检测步骤
+    - name: 智能固件路径检测（多路径适配+模糊匹配）
       id: firmware_path
       run: |
         cd $OPENWRT_PATH
@@ -441,6 +442,8 @@ jobs:
           "bin/targets/ipq807x/generic"
           "bin/targets/qcom/generic"
           "bin/targets/ipq807x/jd-be6500"
+          "target"
+          "bin"
         )
         
         # 查找存在的路径
@@ -469,23 +472,30 @@ jobs:
         echo "FIRMWARE_PATH=$FOUND_PATH" >> $GITHUB_ENV
         echo "firmware_path=$FOUND_PATH" >> $GITHUB_OUTPUT
         
-        # 检查关键固件文件（支持多种命名可能）
+        # 模糊匹配关键固件文件
         echo "检查固件文件..."
-        POSSIBLE_FILENAMES=(
-          "openwrt-ipq807x-generic-jd-be6500-squashfs-sysupgrade.bin"
-          "openwrt-ipq807x-generic-jd-be6500-factory.bin"
-          "openwrt-ipq807x-generic-generic-jd-be6500-squashfs-sysupgrade.bin"  # 兼容现有错误命名
-          "openwrt-ipq5332-generic-jd-be6500-squashfs-sysupgrade.bin"
-          "openwrt-qcom-generic-jd-be6500-squashfs-sysupgrade.bin"
+        
+        # 定义模糊匹配模式
+        FIRMWARE_PATTERNS=(
+          "*ipq*807x*generic*jd-be6500*squashfs-sysupgrade.bin"
+          "*ipq*807x*generic*jd-be6500*factory.bin"
+          "*ipq*5332*generic*jd-be6500*squashfs-sysupgrade.bin"
+          "*qcom*generic*jd-be6500*squashfs-sysupgrade.bin"
+          "*ipq*.bin"
         )
         
+        # 按优先级查找匹配的文件
         FOUND=false
-        for filename in "${POSSIBLE_FILENAMES[@]}"; do
-          if [ -f "$FOUND_PATH/$filename" ]; then
-            echo "✅ 找到固件: $filename"
-            echo "FIRMWARE_FILE=$filename" >> $GITHUB_ENV
-            echo "firmware_file=$filename" >> $GITHUB_OUTPUT
+        for pattern in "${FIRMWARE_PATTERNS[@]}"; do
+          MATCHING_FILES=($(ls $FOUND_PATH/$pattern 2>/dev/null))
+          if [ ${#MATCHING_FILES[@]} -gt 0 ]; then
+            echo "✅ 找到匹配的固件文件: ${MATCHING_FILES[0]}"
+            echo "FIRMWARE_FILE=${MATCHING_FILES[0]}" >> $GITHUB_ENV
+            echo "firmware_file=${MATCHING_FILES[0]}" >> $GITHUB_OUTPUT
             FOUND=true
+            
+            # 保存所有匹配的文件到环境变量
+            echo "ALL_FIRMWARE_FILES=$(IFS=,; echo "${MATCHING_FILES[*]}")" >> $GITHUB_ENV
             break
           fi
         done
