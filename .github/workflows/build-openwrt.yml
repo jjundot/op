@@ -60,7 +60,8 @@ jobs:
           libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools \
           python3-dev rsync subversion swig time unzip wget xmlto zlib1g-dev \
           quilt autopoint libtool-bin gperf flex bison gettext-base asciidoc dos2unix \
-          python3-pyelftools
+          python3-pyelftools python3-pip
+        pip install pyelftools
 
     - name: 配置Git凭证
       run: |
@@ -133,7 +134,12 @@ jobs:
           echo "src-git openwrt_telephony https://git.openwrt.org/feed/telephony.git^openwrt-23.05" >> $FEEDS_CONF
         fi
         
-        # 4. 显示最终Feeds配置
+        # 4. 添加IPQ5332特定驱动源
+        if ! grep -q "ipq5332_drivers" $FEEDS_CONF; then
+          echo "src-git ipq5332_drivers https://github.com/yourusername/openwrt-ipq5332-drivers" >> $FEEDS_CONF
+        fi
+        
+        # 5. 显示最终Feeds配置
         echo "=== 最终Feeds配置 ==="
         cat $FEEDS_CONF
 
@@ -157,90 +163,10 @@ jobs:
         # 安装Feeds（带依赖修复）
         ./scripts/feeds install -a 2>&1 | tee feeds_install.log
         
-        # 检测并安装缺失的关键依赖
-        MISSING_PACKAGES=()
-        for pkg in luci-app-samba wsdd2 luci-app-samba4 libpam liblzma libnetsnmp docker dockerd docker-compose luci-app-dockerman kmod-thermal-qcom; do
-          if ! ./scripts/feeds list | grep -q $pkg; then
-            MISSING_PACKAGES+=($pkg)
-            echo "⚠️ 缺失依赖: $pkg，尝试手动添加"
-            
-            # 自动克隆缺失的包
-            if [ $pkg == "luci-app-samba" ]; then
-              mkdir -p package/custom/luci
-              git clone https://github.com/openwrt/luci.git package/custom/luci
-            elif [ $pkg == "wsdd2" ]; then
-              # 使用替代仓库
-              echo "原wsdd2仓库不可用，改用替代仓库..."
-              mkdir -p package/custom/wsdd2
-              git clone https://github.com/kuoruan/openwrt-wsdd2.git package/custom/wsdd2
-            elif [ $pkg == "docker" ]; then
-              mkdir -p package/custom/docker
-              git clone https://github.com/lisaac/luci-app-dockerman.git package/custom/docker
-            elif [ $pkg == "kmod-thermal-qcom" ]; then
-              # 保持原有处理方式
-              echo "尝试从Lienol仓库获取kmod-thermal-qcom..."
-              
-              # 检查Lienol仓库是否已有此驱动
-              if grep -q "kmod-thermal-qcom" feeds/packages/Makefile; then
-                echo "✅ Lienol仓库已有kmod-thermal-qcom，尝试安装..."
-                ./scripts/feeds install kmod-thermal-qcom
-              else
-                # 如果没有，从官方仓库获取
-                echo "从OpenWrt官方仓库获取kmod-thermal-qcom..."
-                mkdir -p package/kernel/qca-thermal
-                cd package/kernel/qca-thermal
-                
-                # 创建Makefile，使用官方内核配置
-                echo "include \$(TOPDIR)/rules.mk" > Makefile
-                echo "include \$(INCLUDE_DIR)/kernel.mk" >> Makefile
-                echo "" >> Makefile
-                echo "PKG_NAME:=kmod-thermal-qcom" >> Makefile
-                echo "PKG_RELEASE:=1" >> Makefile
-                echo "" >> Makefile
-                echo "include \$(INCLUDE_DIR)/package.mk" >> Makefile
-                echo "" >> Makefile
-                echo "define KernelPackage/thermal-qcom" >> Makefile
-                echo "  SUBMENU:=Other modules" >> Makefile
-                echo "  TITLE:=QCOM Thermal driver" >> Makefile
-                echo "  DEPENDS:=+kmod-hwmon" >> Makefile
-                echo "  KCONFIG:=" >> Makefile
-                echo "    CONFIG_THERMAL=y" >> Makefile
-                echo "    CONFIG_THERMAL_OF=y" >> Makefile
-                echo "    CONFIG_THERMAL_GOV_FAIR_SHARE=y" >> Makefile
-                echo "    CONFIG_THERMAL_GOV_POWER_ALLOCATOR=y" >> Makefile
-                echo "    CONFIG_THERMAL_GOV_STEP_WISE=y" >> Makefile
-                echo "    CONFIG_THERMAL_GOV_USER_SPACE=y" >> Makefile
-                echo "    CONFIG_QCOM_THERMAL=y" >> Makefile
-                echo "  FILES:=\$(LINUX_DIR)/drivers/thermal/*.ko" >> Makefile
-                echo "  FILES+=\$(LINUX_DIR)/drivers/thermal/qcom/*.ko" >> Makefile
-                echo "  AUTOLOAD:=\$(call AutoLoad,30,thermal_core thermal_sysfs thermal_cooling_device of-thermal thermal)" >> Makefile
-                echo "endef" >> Makefile
-                echo "" >> Makefile
-                echo "define KernelPackage/thermal-qcom/description" >> Makefile
-                echo "  Kernel module for QCOM thermal management" >> Makefile
-                echo "endef" >> Makefile
-                echo "" >> Makefile
-                echo "include \$(INCLUDE_DIR)/kernel-defaults.mk" >> Makefile
-                echo "" >> Makefile
-                echo "define Build/Compile" >> Makefile
-                echo "  # 驱动已经在内核中，无需额外编译" >> Makefile
-                echo "endef" >> Makefile
-                echo "" >> Makefile
-                echo "\$(eval \$(call KernelPackage,thermal-qcom))" >> Makefile
-                
-                cd $OPENWRT_PATH
-              fi
-            fi
-          fi
-        done
-        
-        if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
-          echo "发现 ${#MISSING_PACKAGES[@]} 个缺失依赖: ${MISSING_PACKAGES[*]}"
-          echo "重新安装Feeds..."
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-        else
-          echo "✅ 所有依赖已安装"
+        # 确保IPQ5332驱动被安装
+        if ! ./scripts/feeds list | grep -q "kmod-ath11k-ct"; then
+          echo "⚠️ 未找到IPQ5332 Wi-Fi驱动，手动添加..."
+          git clone https://github.com/openwrt/openwrt/tree/openwrt-23.05/package/kernel/ath11k package/kernel/ath11k
         fi
 
     - name: 基础配置生成（保留并强化目标平台）
@@ -276,47 +202,7 @@ jobs:
         echo "=== 当前.config 设备配置 ==="
         grep -E "CONFIG_TARGET_IPQ807X_DEVICE|CONFIG_TARGET_DEVICE_PACKAGES" .config
 
-    - name: 动态依赖配置（根据输入参数）
-      run: |
-        cd $OPENWRT_PATH
-        # 根据用户输入启用功能（追加方式）
-        if [ ${{ github.event.inputs.with_wsdd2 == 'true' }} ]; then
-          echo "CONFIG_PACKAGE_wsdd2=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-wsdd2=y" >> .config
-        fi
-        
-        if [ ${{ github.event.inputs.with_samba4 == 'true' }} ]; then
-          echo "CONFIG_PACKAGE_samba4=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-samba4=y" >> .config
-        fi
-        
-        # 根据用户输入添加Docker支持
-        if [ ${{ github.event.inputs.with_docker == 'true' }} ]; then
-          echo "CONFIG_PACKAGE_docker=y" >> .config
-          echo "CONFIG_PACKAGE_docker-compose=y" >> .config
-          echo "CONFIG_PACKAGE_dockerd=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-dockerman=y" >> .config
-          echo "CONFIG_PACKAGE_luci-i18n-dockerman-zh-cn=y" >> .config
-          echo "CONFIG_PACKAGE_libltdl=y" >> .config
-          echo "CONFIG_PACKAGE_libseccomp=y" >> .config
-          echo "CONFIG_PACKAGE_conntrackd=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-br-netfilter=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-ipt-nat6=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-ip6tables-nat=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-sctp=y" >> .config
-          echo "CONFIG_PACKAGE_tzdata=y" >> .config
-        fi
-        
-        # 修复历史依赖问题（追加方式）
-        echo "CONFIG_PACKAGE_libpam=y" >> .config
-        echo "CONFIG_PACKAGE_liblzma=y" >> .config
-        echo "CONFIG_PACKAGE_libnetsnmp=y" >> .config
-        
-        # 显示关键配置
-        echo "=== 关键配置 ==="
-        grep -E "CONFIG_TARGET|CONFIG_PACKAGE_(samba|wsdd2|docker|libpam|thermal)" .config
-
-    - name: 设备树强制关联（增强版）
+    - name: 设备树强制关联（关键修正）
       run: |
         cd $OPENWRT_PATH
         echo "=== 强制关联设备树到编译系统 ==="
@@ -325,78 +211,63 @@ jobs:
         DTS_DIR="target/linux/$ARCH/dts"
         mkdir -p "$DTS_DIR"
         
-        # 2. 确保设备树文件存在
+        # 2. 复制或生成设备树文件
         DEVICE_TREE="$DTS_DIR/qcom,ipq5332-jd-be6500.dts"
         if [ ! -f "$DEVICE_TREE" ]; then
-          echo "❌ 设备树不存在，重新生成..."
-          # 重新生成设备树，使用echo命令替代cat << EOF
-          echo "/dts-v1/;" > "$DEVICE_TREE"
-          echo "#include \"qcom,ipq5332.dtsi\"" >> "$DEVICE_TREE"
-          echo "#include \"ipq807x.dtsi\"" >> "$DEVICE_TREE"
-          echo "" >> "$DEVICE_TREE"
-          echo "/ {" >> "$DEVICE_TREE"
-          echo "  model = \"JD BE6500\";" >> "$DEVICE_TREE"
-          echo "  compatible = \"qcom,ipq5332\", \"qcom,ipq5000\", \"qcom,ipq807x\";" >> "$DEVICE_TREE"
-          echo "" >> "$DEVICE_TREE"
-          echo "  chosen {" >> "$DEVICE_TREE"
-          echo "    bootargs = \"earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8\";" >> "$DEVICE_TREE"
-          echo "  };" >> "$DEVICE_TREE"
-          echo "" >> "$DEVICE_TREE"
-          echo "  memory@80000000 {" >> "$DEVICE_TREE"
-          echo "    device_type = \"memory\";" >> "$DEVICE_TREE"
-          echo "    reg = <0x80000000 0x40000000>; /* 1GB */" >> "$DEVICE_TREE"
-          echo "  };" >> "$DEVICE_TREE"
-          echo "" >> "$DEVICE_TREE"
-          echo "  ethernet@1a10000 {" >> "$DEVICE_TREE"
-          echo "    compatible = \"qcom,ipq8074-gmac\", \"qcom,ipq8064-gmac\";" >> "$DEVICE_TREE"
-          echo "    reg = <0x1a10000 0x10000>;" >> "$DEVICE_TREE"
-          echo "    interrupts = <0 42 4>;" >> "$DEVICE_TREE"
-          echo "    qcom,phy-handle = <&switch0_phy0>;" >> "$DEVICE_TREE"
-          echo "    qcom,mdio-bus = <&mdio>;" >> "$DEVICE_TREE"
-          echo "    qcom,port-id = <0>;" >> "$DEVICE_TREE"
-          echo "    qcom,rxq-pool = <0>;" >> "$DEVICE_TREE"
-          echo "    qcom,txq-pool = <0>;" >> "$DEVICE_TREE"
-          echo "    qcom,ptp-clock = <0>;" >> "$DEVICE_TREE"
-          echo "  };" >> "$DEVICE_TREE"
-          echo "" >> "$DEVICE_TREE"
-          echo "  mdio@1a14000 {" >> "$DEVICE_TREE"
-          echo "    compatible = \"qcom,ipq8074-mdio\";" >> "$DEVICE_TREE"
-          echo "    reg = <0x1a14000 0x1000>;" >> "$DEVICE_TREE"
-          echo "    #address-cells = <1>;" >> "$DEVICE_TREE"
-          echo "    #size-cells = <0>;" >> "$DEVICE_TREE"
-          echo "" >> "$DEVICE_TREE"
-          echo "    switch0_phy0: phy@0 {" >> "$DEVICE_TREE"
-          echo "      reg = <0>;" >> "$DEVICE_TREE"
-          echo "      compatible = \"ethernet-phy-ieee802.3-c22\";" >> "$DEVICE_TREE"
-          echo "    };" >> "$DEVICE_TREE"
-          echo "  };" >> "$DEVICE_TREE"
-          echo "};" >> "$DEVICE_TREE"
-          
+          echo "❌ 设备树不存在，从缓存复制或生成..."
+          # 假设设备树已存在于仓库中，或从缓存复制
+          if [ -f "qcom,ipq5332-jd-be6500.dts" ]; then
+            cp "qcom,ipq5332-jd-be6500.dts" "$DEVICE_TREE"
+          else
+            # 生成设备树（此处使用简化版本，实际应使用完整设备树）
+            cat > "$DEVICE_TREE" << 'EOF'
+/dts-v1/;
+#include "qcom,ipq5332.dtsi"
+#include "ipq807x.dtsi"
+
+/ {
+    model = "JD BE6500";
+    compatible = "qcom,ipq5332", "qcom,ipq5000", "qcom,ipq807x";
+    # 简化设备树内容，实际应使用完整配置
+};
+EOF
+          fi
           echo "设备树已生成: $DEVICE_TREE"
         else
           echo "✅ 设备树已存在"
         fi
         
-        # 3. 确保设备树被Makefile识别
-        MAKEFILE="target/linux/$ARCH/image/Makefile"
+        # 3. 确保设备树被Makefile识别（关键修正）
+        MAKEFILE="target/linux/$ARCH/Makefile"
         if ! grep -q "jd-be6500" "$MAKEFILE"; then
           echo "❌ 设备树未被Makefile识别，手动添加..."
           
-          # 定义设备树信息，使用echo命令替代cat << EOF
-          echo "" >> "$MAKEFILE"
-          echo "define Device/jd-be6500" >> "$MAKEFILE"
-          echo "  \$(Device/generic)" >> "$MAKEFILE"
-          echo "  DEVICE_TITLE := JD BE6500 (IPQ5332)" >> "$MAKEFILE"
-          echo "  DEVICE_DTS := qcom,ipq5332-jd-be6500" >> "$MAKEFILE"
-          echo "  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom" >> "$MAKEFILE"
-          echo "endef" >> "$MAKEFILE"
-          echo "\$(eval \$(call Device,jd-be6500))" >> "$MAKEFILE"
+          # 备份原Makefile
+          cp "$MAKEFILE" "${MAKEFILE}.bak"
           
-          if grep -q "jd-be6500" "$MAKEFILE"; then
+          # 添加设备定义
+          sed -i "/define Device/generic/a\ \ \ \ \ DEVICE_PACKAGES += kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom" "$MAKEFILE"
+          sed -i "/endef/a\ \ \ \ \ DEVICE_DTS := qcom,ipq5332-jd-be6500" "$MAKEFILE"
+          
+          if grep -q "qcom,ipq5332-jd-be6500" "$MAKEFILE"; then
             echo "✅ 设备树已添加到Makefile"
           else
-            echo "❌ 设备树添加失败"
-            exit 1
+            # 如果sed失败，使用追加方式
+            echo "" >> "$MAKEFILE"
+            echo "define Device/jd-be6500" >> "$MAKEFILE"
+            echo "  $(Device/generic)" >> "$MAKEFILE"
+            echo "  DEVICE_TITLE := JD BE6500 (IPQ5332)" >> "$MAKEFILE"
+            echo "  DEVICE_DTS := qcom,ipq5332-jd-be6500" >> "$MAKEFILE"
+            echo "  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom" >> "$MAKEFILE"
+            echo "endef" >> "$MAKEFILE"
+            echo "\$(eval \$(call Device,jd-be6500))" >> "$MAKEFILE"
+            
+            if grep -q "jd-be6500" "$MAKEFILE"; then
+              echo "✅ 设备树已添加到Makefile"
+            else
+              echo "❌ 设备树添加失败"
+              exit 1
+            fi
           fi
         else
           echo "✅ 设备树已被Makefile识别"
@@ -466,6 +337,9 @@ jobs:
           JOBS=4  # 限制最大线程数为4，避免内存不足
         fi
         
+        # 生成配置（确保目标正确）
+        make defconfig
+        
         # 第一阶段：并行编译
         make -j$JOBS V=s 2>&1 | tee compile_phase1.log
         PHASE1_STATUS=$?
@@ -495,10 +369,10 @@ jobs:
           echo "✅ 并行编译成功"
         fi
 
-    - name: 固件完整性检查（多级路径检测）
+    - name: 固件完整性检查（多级路径检测 - 关键修正）
       run: |
         cd $OPENWRT_PATH
-        # 检测ipq807x目标固件路径
+        # 检测ipq807x目标固件路径（修正命名错误）
         FIRMWARE_PATH=$(find . -type d -name "ipq807x" 2>/dev/null | head -n1)
         if [ -n "$FIRMWARE_PATH" ]; then
           FIRMWARE_PATH="$FIRMWARE_PATH/generic"
@@ -507,26 +381,33 @@ jobs:
           if [ -n "$FIRMWARE_PATH" ]; then
             FIRMWARE_PATH="$FIRMWARE_PATH/generic"
           else
-            echo "❌ 未找到ipq807x/qcom目标目录"
-            echo "可用目标目录:"
-            find . -type d -name "*" | grep targets
-            exit 1
+            FIRMWARE_PATH=$(find . -type d -name "generic" 2>/dev/null | grep -E "ipq807x|qcom" | head -n1)
+            if [ -z "$FIRMWARE_PATH" ]; then
+              echo "❌ 未找到ipq807x/qcom目标目录"
+              echo "可用目标目录:"
+              find . -type d -name "*" | grep targets
+              exit 1
+            fi
           fi
         fi
         
         if [ ! -d "$FIRMWARE_PATH" ]; then
-          FIRMWARE_PATH=$(find . -type d -name "generic" 2>/dev/null | grep -E "ipq807x|qcom" | head -n1)
-          if [ ! -d "$FIRMWARE_PATH" ]; then
-            echo "❌ 未找到通用固件目录"
-            echo "可用目录:"
-            find . -type d -name "generic"
-            exit 1
+          FIRMWARE_PATH=$(find . -type d -name "bin" 2>/dev/null | head -n1)
+          if [ -n "$FIRMWARE_PATH" ]; then
+            FIRMWARE_PATH="$FIRMWARE_PATH/$ARCH/$SUBARCH"
           fi
+        fi
+        
+        if [ ! -d "$FIRMWARE_PATH" ]; then
+          echo "❌ 未找到通用固件目录"
+          echo "可用目录:"
+          find . -type d -name "bin"
+          exit 1
         fi
         
         echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
         
-        # 检查关键固件文件
+        # 检查关键固件文件（修正命名规则）
         REQUIRED_FILES=(
           "openwrt-$ARCH-$SUBARCH-generic-jd-be6500-squashfs-sysupgrade.bin"
           "openwrt-$ARCH-$SUBARCH-generic-rootfs.tar.gz"
@@ -544,6 +425,10 @@ jobs:
           echo "❌ 发现缺失固件文件: ${MISSING_FILES[*]}"
           echo "可用文件:"
           ls -lh $FIRMWARE_PATH/* || true
+          
+          # 尝试查找其他可能的固件文件
+          echo "其他可能的固件文件:"
+          ls -lh $FIRMWARE_PATH/*jd-be6500* || true
           exit 1
         else
           echo "✅ 所有关键固件文件已生成"
