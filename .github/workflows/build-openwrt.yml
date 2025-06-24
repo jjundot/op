@@ -333,6 +333,7 @@ jobs:
         else
           echo "✅ 并行编译成功"
         fi
+
     - name: 修复设备定义（避免重复generic）
       run: |
         cd $OPENWRT_PATH
@@ -416,7 +417,7 @@ jobs:
         # 验证路径
         if [ -z "$FIRMWARE_PATH" ]; then
           echo "❌ 未找到任何固件目录，可用路径:"
-          find . -type d -name "target" -o -name "bin" -o -name "ipq807x" -o -name "ipq5332" -o -name "qcom"
+          find . -type d -name "bin" -o -name "ipq807x" -o -name "qcom"
           exit 1
         fi
         
@@ -444,6 +445,7 @@ jobs:
           ls -lh $FIRMWARE_PATH/*.bin || true
           exit 1
         fi
+
     - name: 显示目录结构（调试用）
       run: |
         cd $OPENWRT_PATH
@@ -452,6 +454,7 @@ jobs:
         
         echo "=== 固件文件列表 ==="
         find . -name "*.bin" -o -name "*.img"
+
     - name: 固件完整性检查（多路径适配）
       run: |
         cd $OPENWRT_PATH
@@ -494,19 +497,12 @@ jobs:
         echo "release_version=OpenWrt_${RELEASE_DATE}_${COMMIT_ID}" >> $GITHUB_OUTPUT
         
         cat <<EOF > version.info
-        OpenWrt 固件 for JD BE6500 (IPQ5332)
-        编译时间: $(date +"%Y-%m-%d %H:%M:%S")
-        Git 提交: $COMMIT_ID
-        分支: $LIENOL_BRANCH
-        目标平台: $ARCH/$SUBARCH
-        EOF
-        # （注：此处cat是为了格式化多行文本，若需纯echo，可拆分为逐行echo）
-        # 如需纯echo，可替换为：
-        # echo "OpenWrt 固件 for JD BE6500 (IPQ5332)" > version.info
-        # echo "编译时间: $(date +"%Y-%m-%d %H:%M:%S")" >> version.info
-        # echo "Git 提交: $COMMIT_ID" >> version.info
-        # echo "分支: $LIENOL_BRANCH" >> version.info
-        # echo "目标平台: $ARCH/$SUBARCH" >> version.info
+OpenWrt 固件 for JD BE6500 (IPQ5332)
+编译时间: $(date +"%Y-%m-%d %H:%M:%S")
+Git 提交: $COMMIT_ID
+分支: $LIENOL_BRANCH
+目标平台: $ARCH/$SUBARCH
+EOF
 
     - name: 上传固件到Artifact
       if: env.UPLOAD_FIRMWARE == 'true'
