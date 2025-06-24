@@ -333,40 +333,40 @@ jobs:
         else
           echo "✅ 并行编译成功"
         fi
-- name: 修复设备定义（避免重复generic）
-  run: |
-    cd $OPENWRT_PATH
-    MAKEFILE="target/linux/$ARCH/image/Makefile"
-    
-    # 检查是否已存在正确定义
-    if ! grep -q "define Device/jd-be6500" "$MAKEFILE"; then
-      echo "❌ 未找到设备定义，添加正确配置..."
-      
-      # 备份原文件
-      cp "$MAKEFILE" "${MAKEFILE}.bak"
-      
-      # 添加设备定义（继承自ipq807x）
-      echo 'define Device/jd-be6500' >> "$MAKEFILE"
-      echo '  $(Device/ipq807x)' >> "$MAKEFILE"
-      echo '  DEVICE_TITLE := JD BE6500 (IPQ5332)' >> "$MAKEFILE"
-      echo '  DEVICE_DTS := qcom,ipq5332-jd-be6500' >> "$MAKEFILE"
-      echo '  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom' >> "$MAKEFILE"
-      echo 'endef' >> "$MAKEFILE"
-      echo 'TARGET_DEVICES += jd-be6500' >> "$MAKEFILE"
-      
-      echo "✅ 设备定义已更新"
-    else
-      # 修复可能的重复generic定义
-      echo "修复设备定义中的重复generic..."
-      sed -i '/define Device\/jd-be6500/a \  DEVICE_NAME := jd-be6500' "$MAKEFILE"
-      sed -i '/define Device\/jd-be6500/a \  DEVICE_PROFILE := jd-be6500' "$MAKEFILE"
-      sed -i '/define Device\/jd-be6500/a \  DEVICE_FILESYSTEMS := squashfs ext4' "$MAKEFILE"
-      
-      # 确保DEVICE_PACKAGES正确
-      sed -i 's/^ \+DEVICE_PACKAGES.*/  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom/' "$MAKEFILE"
-      
-      echo "✅ 设备定义已优化"
-    fi
+    - name: 修复设备定义（避免重复generic）
+      run: |
+        cd $OPENWRT_PATH
+        MAKEFILE="target/linux/$ARCH/image/Makefile"
+        
+        # 检查是否已存在正确定义
+        if ! grep -q "define Device/jd-be6500" "$MAKEFILE"; then
+          echo "❌ 未找到设备定义，添加正确配置..."
+          
+          # 备份原文件
+          cp "$MAKEFILE" "${MAKEFILE}.bak"
+          
+          # 添加设备定义（继承自ipq807x）
+          echo 'define Device/jd-be6500' >> "$MAKEFILE"
+          echo '  $(Device/ipq807x)' >> "$MAKEFILE"
+          echo '  DEVICE_TITLE := JD BE6500 (IPQ5332)' >> "$MAKEFILE"
+          echo '  DEVICE_DTS := qcom,ipq5332-jd-be6500' >> "$MAKEFILE"
+          echo '  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom' >> "$MAKEFILE"
+          echo 'endef' >> "$MAKEFILE"
+          echo 'TARGET_DEVICES += jd-be6500' >> "$MAKEFILE"
+          
+          echo "✅ 设备定义已更新"
+        else
+          # 修复可能的重复generic定义
+          echo "修复设备定义中的重复generic..."
+          sed -i '/define Device\/jd-be6500/a \  DEVICE_NAME := jd-be6500' "$MAKEFILE"
+          sed -i '/define Device\/jd-be6500/a \  DEVICE_PROFILE := jd-be6500' "$MAKEFILE"
+          sed -i '/define Device\/jd-be6500/a \  DEVICE_FILESYSTEMS := squashfs ext4' "$MAKEFILE"
+          
+          # 确保DEVICE_PACKAGES正确
+          sed -i 's/^ \+DEVICE_PACKAGES.*/  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom/' "$MAKEFILE"
+          
+          echo "✅ 设备定义已优化"
+        fi
 
     - name: 清理.config中的冗余设置
       run: |
