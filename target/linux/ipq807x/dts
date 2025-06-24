@@ -39,7 +39,7 @@
         status = "okay";
     };
 
-    /* 以太网控制器 */
+    /* 以太网控制器 - 修正2.5G网口配置 */
     ethernet@1a10000 {
         compatible = "qcom,ipq8074-gmac", "qcom,ipq8064-gmac";
         reg = <0x1a10000 0x10000>;
@@ -66,75 +66,13 @@
         switch0_phy0: phy@0 {
             reg = <0>;
             compatible = "ethernet-phy-ieee802.3-c22";
-            phy-mode = "rgmii";
+            phy-mode = "1000baseT/2.5G"; /* 支持2.5G */
             qcom,rx-delay = <0>;
             qcom,tx-delay = <0>;
         };
     };
 
-    /* USB3.0控制器 */
-    usb@fe980000 {
-        compatible = "qcom,ipq8074-dwc3";
-        reg = <0xfe980000 0x10000>;
-        interrupts = <0 90 4>;
-        clocks = <&gcc GCC_DWC3_CLK>, <&gcc GCC_DWC3_AHB_CLK>;
-        clock-names = "bus", "ahb";
-        qcom,tx-fifo-size = <0x400>;
-        qcom,max-speed = <5>; /* 5Gbps */
-        dr_mode = "host";
-        phys = <&usb3_phy 0>;
-        phy-names = "usb3-phy";
-        qcom,usb3-phy = <&usb3_phy>;
-        status = "okay";
-    };
-
-    /* USB3.0 PHY */
-    usb3_phy: usb3-phy@fe9c0000 {
-        compatible = "qcom,ipq8074-usb3-phy";
-        reg = <0xfe9c0000 0x10000>;
-        clocks = <&gcc GCC_USB3_PHY_CORE_CLK>,
-                 <&gcc GCC_USB3_PHY_REF_CLK>;
-        clock-names = "core", "ref";
-        status = "okay";
-    };
-
-    /* 看门狗定时器 */
-    watchdog@1a08000 {
-        compatible = "qcom,ipq8074-watchdog";
-        reg = <0x1a08000 0x1000>;
-        interrupts = <0 28 4>;
-        clocks = <&gcc GCC_WDT_CLK>;
-        timeout-sec = <30>; /* 30秒超时 */
-        status = "okay";
-    };
-
-    /* NAND闪存控制器 */
-    nand@1a30000 {
-        compatible = "qcom,ipq8074-nand";
-        reg = <0x1a30000 0x10000>;
-        #address-cells = <1>;
-        #size-cells = <0>;
-        interrupts = <0 46 4>;
-        clocks = <&gcc GCC_NAND_CLK>;
-        clock-names = "nand";
-        status = "okay";
-        
-        nand-controller {
-            #address-cells = <1>;
-            #size-cells = <1>;
-            nand-on-flash-bbt;
-            nand-ecc-mode = "hw";
-            nand-ecc-strength = <4>;
-            nand-bus-width = <8>;
-            nand-cle-offset = <0x10>;
-            nand-ale-offset = <0x14>;
-            nand-data-offset = <0x0>;
-            nand-write-delay = <10>;
-            nand-read-delay = <10>;
-        };
-    };
-
-    /* WiFi控制器 - 调整为双频/三频支持 (2.4G + 5.2G + 5.8G) */
+    /* WiFi控制器 - 支持Wi-Fi 6E (IPQ5332支持) */
     wifi@0 {
         compatible = "qcom,ipq5332-wifi";
         reg = <0>;
@@ -142,7 +80,7 @@
         qcom,wifi-cal-data = <&wifi_cal_data>;
         qcom,band-2g = <&wifi_2g>;
         qcom,band-5g-low = <&wifi_5g_low>;  /* 5.2G频段 */
-        qcom,band-5g-high = <&wifi_5g_high>; /* 5.8G频段 */
+        qcom,band-6g = <&wifi_6g>;           /* 6GHz频段 - Wi-Fi 6E */
         status = "okay";
     };
 
@@ -165,12 +103,12 @@
         channel-range-end = <64>;
     };
 
-    wifi_5g_high: band-5g-high {
+    wifi_6g: band-6g {
         channel-width = <160>;
         tx-power = <23>; /* dBm */
         antenna-gain = <5>; /* dBi */
-        channel-range-start = <100>;
-        channel-range-end = <165>;
+        channel-range-start = <1200>;
+        channel-range-end = <1400>;
     };
 
     /* PCIe控制器 - 连接WiFi */
@@ -238,6 +176,13 @@
             gpios = <&gpio 18 0>; /* GPIO18 */
             default-state = "off";
             linux,default-trigger = "phy1txinuse";
+        };
+        
+        wifi-6g: led-wifi-6g {
+            label = "wifi-6g";
+            gpios = <&gpio 19 0>; /* GPIO19 */
+            default-state = "off";
+            linux,default-trigger = "phy2txinuse";
         };
         
         wan: led-wan {
