@@ -166,7 +166,11 @@ jobs:
         # 确保IPQ5332驱动被安装
         if ! ./scripts/feeds list | grep -q "kmod-ath11k-ct"; then
           echo "⚠️ 未找到IPQ5332 Wi-Fi驱动，手动添加..."
-          git clone https://github.com/openwrt/openwrt/tree/openwrt-23.05/package/kernel/ath11k package/kernel/ath11k
+          
+          # 修正：使用正确的Git仓库URL
+          git clone -b openwrt-23.05 https://github.com/openwrt/openwrt.git openwrt_temp
+          cp -r openwrt_temp/package/kernel/ath11k package/kernel/
+          rm -rf openwrt_temp
         fi
 
     - name: 基础配置生成（保留并强化目标平台）
