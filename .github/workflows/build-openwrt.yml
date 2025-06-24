@@ -24,7 +24,7 @@ on:
 env:
   LIENOL_REPO: https://github.com/Lienol/openwrt          
   LIENOL_BRANCH: 23.05                                  
-  ARCH: ipq807x                                          
+  ARCH: ipq5332                                          
   SUBARCH: generic                                       
   CPU_ARCH: aarch64_cortex-a53                           
   FEEDS_CONF: feeds.conf.default                         
