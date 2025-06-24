@@ -1,0 +1,63 @@
+# qcom,ipq5332-jd-be6500.dts
+/dts-v1/;
+#include "qcom,ipq5332.dtsi"
+#include "ipq807x.dtsi"
+
+/ {
+  model = "JD BE6500";
+  compatible = "qcom,ipq5332", "qcom,ipq5000", "qcom,ipq807x";
+
+  chosen {
+    bootargs = "earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8";
+  };
+
+  memory@80000000 {
+    device_type = "memory";
+    reg = <0x80000000 0x40000000>; /* 1GB */
+  };
+
+  # 网络设备配置
+  ethernet@1a10000 {
+    compatible = "qcom,ipq8074-gmac", "qcom,ipq8064-gmac";
+    reg = <0x1a10000 0x10000>;
+    interrupts = <0 42 4>;
+    qcom,phy-handle = <&switch0_phy0>;
+    qcom,mdio-bus = <&mdio>;
+    qcom,port-id = <0>;
+    qcom,rxq-pool = <0>;
+    qcom,txq-pool = <0>;
+    qcom,ptp-clock = <0>;
+  };
+
+  mdio@1a14000 {
+    compatible = "qcom,ipq8074-mdio";
+    reg = <0x1a14000 0x1000>;
+    #address-cells = <1>;
+    #size-cells = <0>;
+
+    switch0_phy0: phy@0 {
+      reg = <0>;
+      compatible = "ethernet-phy-ieee802.3-c22";
+    };
+  };
+
+  # USB3.0配置
+  usb@fe980000 {
+    compatible = "qcom,ipq8074-dwc3";
+    reg = <0xfe980000 0x10000>;
+    interrupts = <0 90 4>;
+    clocks = <&gcc GCC_DWC3_CLK>, <&gcc GCC_DWC3_AHB_CLK>;
+    clock-names = "bus", "ahb";
+    qcom,tx-fifo-size = <0x400>;
+    qcom,max-speed = <5>; /* 5Gbps */
+    status = "okay";
+  };
+
+  # 温度传感器配置
+  thermal@1a00000 {
+    compatible = "qcom,pm8998-thermal";
+    reg = <0x1a00000 0x1000>;
+    interrupts = <0 12 0>;
+    status = "okay";
+  };
+};
