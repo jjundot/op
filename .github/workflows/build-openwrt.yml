@@ -333,7 +333,125 @@ jobs:
         else
           echo "✅ 并行编译成功"
         fi
+- name: 修复设备定义（避免重复generic）
+  run: |
+    cd $OPENWRT_PATH
+    MAKEFILE="target/linux/$ARCH/image/Makefile"
+    
+    # 检查是否已存在正确定义
+    if ! grep -q "define Device/jd-be6500" "$MAKEFILE"; then
+      echo "❌ 未找到设备定义，添加正确配置..."
+      
+      # 备份原文件
+      cp "$MAKEFILE" "${MAKEFILE}.bak"
+      
+      # 添加设备定义（继承自ipq807x）
+      echo 'define Device/jd-be6500' >> "$MAKEFILE"
+      echo '  $(Device/ipq807x)' >> "$MAKEFILE"
+      echo '  DEVICE_TITLE := JD BE6500 (IPQ5332)' >> "$MAKEFILE"
+      echo '  DEVICE_DTS := qcom,ipq5332-jd-be6500' >> "$MAKEFILE"
+      echo '  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom' >> "$MAKEFILE"
+      echo 'endef' >> "$MAKEFILE"
+      echo 'TARGET_DEVICES += jd-be6500' >> "$MAKEFILE"
+      
+      echo "✅ 设备定义已更新"
+    else
+      # 修复可能的重复generic定义
+      echo "修复设备定义中的重复generic..."
+      sed -i '/define Device\/jd-be6500/a \  DEVICE_NAME := jd-be6500' "$MAKEFILE"
+      sed -i '/define Device\/jd-be6500/a \  DEVICE_PROFILE := jd-be6500' "$MAKEFILE"
+      sed -i '/define Device\/jd-be6500/a \  DEVICE_FILESYSTEMS := squashfs ext4' "$MAKEFILE"
+      
+      # 确保DEVICE_PACKAGES正确
+      sed -i 's/^ \+DEVICE_PACKAGES.*/  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom/' "$MAKEFILE"
+      
+      echo "✅ 设备定义已优化"
+    fi
 
+    - name: 清理.config中的冗余设置
+      run: |
+        cd $OPENWRT_PATH
+        CONFIG_FILE=".config"
+        
+        # 备份原配置
+        cp "$CONFIG_FILE" "${CONFIG_FILE}.bak"
+        
+        # 移除重复的TARGET_GENERIC设置
+        sed -i '/CONFIG_TARGET_GENERIC/d' "$CONFIG_FILE"
+        
+        # 确保正确的设备设置
+        sed -i '/CONFIG_TARGET_IPQ807X/d' "$CONFIG_FILE"
+        sed -i '/CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500/d' "$CONFIG_FILE"
+        
+        echo "CONFIG_TARGET_IPQ807X=y" >> "$CONFIG_FILE"
+        echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> "$CONFIG_FILE"
+        
+        # 移除可能导致重复命名的设置
+        sed -i '/CONFIG_TARGET_IMAGES_PAD/d' "$CONFIG_FILE"
+        sed -i '/CONFIG_TARGET_ROOTFS_PARTSIZE/d' "$CONFIG_FILE"
+        
+        echo "✅ .config已优化"
+
+    - name: 固件完整性检查（改进路径检测）
+      run: |
+        cd $OPENWRT_PATH
+        
+        # 尝试所有可能的路径组合
+        FIRMWARE_PATHS=(
+          "target/linux/ipq5332/generic"
+          "target/linux/ipq807x/generic"
+          "target/linux/qcom/generic"
+          "bin/targets/ipq807x/generic"
+          "bin/targets/qcom/generic"
+        )
+        
+        # 查找存在的路径
+        for path in "${FIRMWARE_PATHS[@]}"; do
+          if [ -d "$path" ]; then
+            FIRMWARE_PATH="$path"
+            break
+          fi
+        done
+        
+        # 验证路径
+        if [ -z "$FIRMWARE_PATH" ]; then
+          echo "❌ 未找到任何固件目录，可用路径:"
+          find . -type d -name "target" -o -name "bin" -o -name "ipq807x" -o -name "ipq5332" -o -name "qcom"
+          exit 1
+        fi
+        
+        echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
+        
+        # 检查关键固件文件（支持多种命名可能）
+        POSSIBLE_FILENAMES=(
+          "openwrt-ipq807x-generic-jd-be6500-squashfs-sysupgrade.bin"
+          "openwrt-ipq807x-generic-generic-jd-be6500-squashfs-sysupgrade.bin"  # 兼容现有错误命名
+          "openwrt-ipq5332-generic-jd-be6500-squashfs-sysupgrade.bin"
+          "openwrt-qcom-generic-jd-be6500-squashfs-sysupgrade.bin"
+        )
+        
+        FOUND=false
+        for filename in "${POSSIBLE_FILENAMES[@]}"; do
+          if [ -f "$FIRMWARE_PATH/$filename" ]; then
+            echo "✅ 找到固件: $filename"
+            FOUND=true
+            break
+          fi
+        done
+        
+        if [ "$FOUND" = false ]; then
+          echo "❌ 未找到任何匹配的固件文件"
+          ls -lh $FIRMWARE_PATH/*.bin || true
+          exit 1
+        fi
+    - name: 显示目录结构（调试用）
+      run: |
+        cd $OPENWRT_PATH
+        echo "=== 目录结构 ==="
+        find . -type d -name "target" -o -name "bin" -o -name "ipq807x" -o -name "ipq5332" -o -name "qcom"
+        
+        echo "=== 固件文件列表 ==="
+        find . -name "*.bin" -o -name "*.img"
     - name: 固件完整性检查（多路径适配）
       run: |
         cd $OPENWRT_PATH
