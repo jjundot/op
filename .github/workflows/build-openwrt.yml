@@ -104,46 +104,27 @@ jobs:
         # 备份原始Feeds配置
         cp $FEEDS_CONF ${FEEDS_CONF}.bak
         
-        # 1. 清理重复源并确保唯一性
-        UNIQUE_FEEDS=$(cat $FEEDS_CONF | grep -v '^#' | sort -u | awk '!a[$2]++')
+        # 清理Feeds配置，只保留必要的源
         > $FEEDS_CONF
-        echo "$UNIQUE_FEEDS" >> $FEEDS_CONF
         
-        # 2. 添加必要源（使用唯一名称）
-        if ! grep -q "lienol" $FEEDS_CONF; then
-          echo "src-git lienol https://github.com/Lienol/openwrt-package" >> $FEEDS_CONF
-        fi
-        if ! grep -q "kenzo" $FEEDS_CONF; then
-          echo "src-git kenzo https://github.com/kenzok8/openwrt-packages" >> $FEEDS_CONF
-        fi
-        if ! grep -q "small" $FEEDS_CONF; then
-          echo "src-git small https://github.com/kenzok8/small" >> $FEEDS_CONF
-        fi
+        # 添加Lienol官方源
+        echo "src-git lienol https://github.com/Lienol/openwrt-package" >> $FEEDS_CONF
         
-        # 3. 使用唯一名称添加官方源
-        if ! grep -q "openwrt_packages" $FEEDS_CONF; then
-          echo "src-git openwrt_packages https://git.openwrt.org/feed/packages.git^openwrt-23.05" >> $FEEDS_CONF
-        fi
-        if ! grep -q "openwrt_luci" $FEEDS_CONF; then
-          echo "src-git openwrt_luci https://git.openwrt.org/project/luci.git^openwrt-23.05" >> $FEEDS_CONF
-        fi
-        if ! grep -q "openwrt_routing" $FEEDS_CONF; then
-          echo "src-git openwrt_routing https://git.openwrt.org/feed/routing.git^openwrt-23.05" >> $FEEDS_CONF
-        fi
-        if ! grep -q "openwrt_telephony" $FEEDS_CONF; then
-          echo "src-git openwrt_telephony https://git.openwrt.org/feed/telephony.git^openwrt-23.05" >> $FEEDS_CONF
-        fi
+        # 添加OpenWrt官方源（明确指定版本）
+        echo "src-git packages https://git.openwrt.org/feed/packages.git^openwrt-23.05" >> $FEEDS_CONF
+        echo "src-git luci https://git.openwrt.org/project/luci.git^openwrt-23.05" >> $FEEDS_CONF
+        echo "src-git routing https://git.openwrt.org/feed/routing.git^openwrt-23.05" >> $FEEDS_CONF
+        echo "src-git telephony https://git.openwrt.org/feed/telephony.git^openwrt-23.05" >> $FEEDS_CONF
+        echo "src-git wireless https://git.openwrt.org/feed/wireless.git^openwrt-23.05" >> $FEEDS_CONF
         
-        # 4. 添加IPQ5332特定驱动源
-        if ! grep -q "ipq5332_drivers" $FEEDS_CONF; then
-          echo "src-git ipq5332_drivers https://github.com/yourusername/openwrt-ipq5332-drivers" >> $FEEDS_CONF
-        fi
+        # 添加IPQ5332特定驱动源（使用官方源替代第三方）
+        echo "src-git qca https://git.openwrt.org/project/qca.git^openwrt-23.05" >> $FEEDS_CONF
         
-        # 5. 显示最终Feeds配置
+        # 显示最终Feeds配置
         echo "=== 最终Feeds配置 ==="
         cat $FEEDS_CONF
 
-    - name: 依赖强化安装（解决历史报错）
+    - name: 依赖强化安装（官方源优先）
       run: |
         cd $OPENWRT_PATH
         # 清理旧Feeds
@@ -160,91 +141,24 @@ jobs:
           sleep 10
         done
         
-        # 安装Feeds（带依赖修复）
-        ./scripts/feeds install -a 2>&1 | tee feeds_install.log
+        # 安装Feeds（官方源优先）
+        ./scripts/feeds install -a -p packages
+        ./scripts/feeds install -a -p luci
+        ./scripts/feeds install -a -p routing
+        ./scripts/feeds install -a -p telephony
+        ./scripts/feeds install -a -p wireless
+        ./scripts/feeds install -a -p qca
         
         # 确保IPQ5332驱动被安装
         if ! ./scripts/feeds list | grep -q "kmod-ath11k-ct"; then
-          echo "⚠️ 未找到IPQ5332 Wi-Fi驱动，尝试通过官方Feeds系统获取..."
-          
-          # 修正：通过官方Feeds系统强制更新无线驱动
-          echo "src-git wireless https://git.openwrt.org/feed/wireless.git^openwrt-23.05" >> feeds.conf
-          echo "src-git packages https://git.openwrt.org/feed/packages.git^openwrt-23.05" >> feeds.conf
-          
-          # 重新更新Feeds
-          ./scripts/feeds update wireless packages
-          ./scripts/feeds install -a -f -p wireless
-          ./scripts/feeds install -a -f -p packages
+          echo "⚠️ 未找到IPQ5332 Wi-Fi驱动，尝试通过qca源获取..."
+          ./scripts/feeds update qca
+          ./scripts/feeds install -a -p qca
           
           # 再次检查驱动是否存在
           if ! ./scripts/feeds list | grep -q "kmod-ath11k-ct"; then
-            echo "❌ 官方Feeds中仍未找到ath11k驱动，尝试手动集成..."
-            
-            # 创建驱动目录
-            mkdir -p package/kernel/ath11k-ct
-            
-            # 从OpenWrt源码中提取必要文件（使用内置tar命令）
-            wget -qO- "https://git.openwrt.org/?p=openwrt/openwrt.git;a=snapshot;h=refs/heads/openwrt-23.05;sf=tgz" | tar -xz -C /tmp
-            
-            # 复制ath11k相关文件
-            if [ -d "/tmp/openwrt-openwrt-23.05/package/kernel/ath11k" ]; then
-              cp -r /tmp/openwrt-openwrt-23.05/package/kernel/ath11k package/kernel/
-              echo "✅ 已从OpenWrt源码快照中提取ath11k驱动"
-            elif [ -d "/tmp/openwrt-openwrt-23.05/package/kernel/mac80211" ]; then
-              cp -r /tmp/openwrt-openwrt-23.05/package/kernel/mac80211 package/kernel/
-              echo "✅ 已从OpenWrt源码快照中提取mac80211驱动"
-            else
-              echo "❌ 无法从OpenWrt源码中获取无线驱动"
-              
-              # 备选方案：使用回退版本的驱动
-              echo "尝试使用回退版本的ath11k驱动..."
-              mkdir -p package/kernel/ath11k-ct
-              
-              # 创建基本Makefile
-              echo 'include $(TOPDIR)/rules.mk' > package/kernel/ath11k-ct/Makefile
-              echo 'include $(INCLUDE_DIR)/kernel.mk' >> package/kernel/ath11k-ct/Makefile
-              echo '' >> package/kernel/ath11k-ct/Makefile
-              echo 'PKG_NAME:=ath11k-ct' >> package/kernel/ath11k-ct/Makefile
-              echo 'PKG_VERSION:=2023.05' >> package/kernel/ath11k-ct/Makefile
-              echo 'PKG_RELEASE:=1' >> package/kernel/ath11k-ct/Makefile
-              echo '' >> package/kernel/ath11k-ct/Makefile
-              echo 'PKG_SOURCE_URL:=https://git.openwrt.org/project/libs/ath11k-ct.git' >> package/kernel/ath11k-ct/Makefile
-              echo 'PKG_SOURCE_PROTO:=git' >> package/kernel/ath11k-ct/Makefile
-              echo 'PKG_SOURCE_VERSION:=openwrt-23.05' >> package/kernel/ath11k-ct/Makefile
-              echo 'PKG_MIRROR_HASH:=skip' >> package/kernel/ath11k-ct/Makefile
-              echo '' >> package/kernel/ath11k-ct/Makefile
-              echo 'PKG_MAINTAINER:=John Doe <john@example.com>' >> package/kernel/ath11k-ct/Makefile
-              echo 'PKG_LICENSE:=GPL-2.0-only' >> package/kernel/ath11k-ct/Makefile
-              echo 'PKG_LICENSE_FILES:=LICENSE' >> package/kernel/ath11k-ct/Makefile
-              echo '' >> package/kernel/ath11k-ct/Makefile
-              echo 'include $(INCLUDE_DIR)/package.mk' >> package/kernel/ath11k-ct/Makefile
-              echo '' >> package/kernel/ath11k-ct/Makefile
-              echo 'define KernelPackage/ath11k-ct' >> package/kernel/ath11k-ct/Makefile
-              echo '  SUBMENU:=Wireless Drivers' >> package/kernel/ath11k-ct/Makefile
-              echo '  TITLE:=Atheros ath11k wireless driver (CT version)' >> package/kernel/ath11k-ct/Makefile
-              echo '  DEPENDS:=+kmod-cfg80211 +kmod-usb-core +kmod-mac80211' >> package/kernel/ath11k-ct/Makefile
-              echo '  KCONFIG:= \' >> package/kernel/ath11k-ct/Makefile
-              echo '    CONFIG_ATH11K=m \' >> package/kernel/ath11k-ct/Makefile
-              echo '    CONFIG_ATH11K_DEBUGFS=n \' >> package/kernel/ath11k-ct/Makefile
-              echo '    CONFIG_ATH11K_TRACE=n' >> package/kernel/ath11k-ct/Makefile
-              echo '  FILES:=$(PKG_BUILD_DIR)/compat.ko $(PKG_BUILD_DIR)/ath11k.ko' >> package/kernel/ath11k-ct/Makefile
-              echo '  AUTOLOAD:=$(call AutoProbe,ath11k)' >> package/kernel/ath11k-ct/Makefile
-              echo 'endef' >> package/kernel/ath11k-ct/Makefile
-              echo '' >> package/kernel/ath11k-ct/Makefile
-              echo 'define KernelPackage/ath11k-ct/description' >> package/kernel/ath11k-ct/Makefile
-              echo '  This package contains the Atheros ath11k wireless driver' >> package/kernel/ath11k-ct/Makefile
-              echo '  for newer Qualcomm Atheros chipsets.' >> package/kernel/ath11k-ct/Makefile
-              echo 'endef' >> package/kernel/ath11k-ct/Makefile
-              echo '' >> package/kernel/ath11k-ct/Makefile
-              echo '$(eval $(call KernelPackage,ath11k-ct))' >> package/kernel/ath11k-ct/Makefile
-              
-              echo "✅ 已创建ath11k-ct驱动的基本Makefile"
-            fi
-            
-            # 清理临时文件
-            rm -rf /tmp/openwrt-openwrt-23.05
-          else
-            echo "✅ 已通过官方Feeds获取ath11k驱动"
+            echo "❌ 仍未找到ath11k驱动，使用官方无线驱动替代"
+            ./scripts/feeds install -a -p wireless
           fi
         else
           echo "✅ IPQ5332 Wi-Fi驱动已安装"
@@ -288,11 +202,11 @@ jobs:
         cd $OPENWRT_PATH
         echo "=== 强制关联设备树到编译系统 ==="
         
-        # 1. 确保设备树目录存在
+        # 确保设备树目录存在
         DTS_DIR="target/linux/$ARCH/dts"
         mkdir -p "$DTS_DIR"
         
-        # 2. 复制或生成设备树文件
+        # 复制或生成设备树文件
         DEVICE_TREE="$DTS_DIR/qcom,ipq5332-jd-be6500.dts"
         if [ ! -f "$DEVICE_TREE" ]; then
           echo "❌ 设备树不存在，从缓存复制或生成..."
@@ -300,7 +214,7 @@ jobs:
           if [ -f "qcom,ipq5332-jd-be6500.dts" ]; then
             cp "qcom,ipq5332-jd-be6500.dts" "$DEVICE_TREE"
           else
-            # 生成设备树
+            # 生成基本设备树
             echo '/dts-v1/;' > "$DEVICE_TREE"
             echo '#include "qcom,ipq5332.dtsi"' >> "$DEVICE_TREE"
             echo '#include "ipq807x.dtsi"' >> "$DEVICE_TREE"
@@ -308,7 +222,7 @@ jobs:
             echo '/ {' >> "$DEVICE_TREE"
             echo '    model = "JD BE6500";' >> "$DEVICE_TREE"
             echo '    compatible = "qcom,ipq5332", "qcom,ipq5000", "qcom,ipq807x";' >> "$DEVICE_TREE"
-            echo '    # 简化设备树内容，实际应使用完整配置' >> "$DEVICE_TREE"
+            echo '    # 设备树内容' >> "$DEVICE_TREE"
             echo '};' >> "$DEVICE_TREE"
           fi
           echo "设备树已生成: $DEVICE_TREE"
@@ -316,8 +230,8 @@ jobs:
           echo "✅ 设备树已存在"
         fi
         
-        # 3. 确保设备树被Makefile识别（关键修正）
-        MAKEFILE="target/linux/$ARCH/Makefile"
+        # 确保设备树被Makefile识别
+        MAKEFILE="target/linux/$ARCH/image/Makefile"
         if ! grep -q "jd-be6500" "$MAKEFILE"; then
           echo "❌ 设备树未被Makefile识别，手动添加..."
           
@@ -325,20 +239,15 @@ jobs:
           cp "$MAKEFILE" "${MAKEFILE}.bak"
           
           # 添加设备定义
-          sed -i "/define Device/generic/a\ \ \ \ \ DEVICE_PACKAGES += kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom" "$MAKEFILE"
-          sed -i "/endef/a\ \ \ \ \ DEVICE_DTS := qcom,ipq5332-jd-be6500" "$MAKEFILE"
-          
-          if ! grep -q "qcom,ipq5332-jd-be6500" "$MAKEFILE"; then
-            # 如果sed失败，使用追加方式
-            echo "" >> "$MAKEFILE"
-            echo "define Device/jd-be6500" >> "$MAKEFILE"
-            echo "  \$(Device/generic)" >> "$MAKEFILE"
-            echo "  DEVICE_TITLE := JD BE6500 (IPQ5332)" >> "$MAKEFILE"
-            echo "  DEVICE_DTS := qcom,ipq5332-jd-be6500" >> "$MAKEFILE"
-            echo "  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom" >> "$MAKEFILE"
-            echo "endef" >> "$MAKEFILE"
-            echo "\$(eval \$(call Device,jd-be6500))" >> "$MAKEFILE"
-          fi
+          cat >> "$MAKEFILE" << EOF
+define Device/jd-be6500
+  \$(Device/generic)
+  DEVICE_TITLE := JD BE6500 (IPQ5332)
+  DEVICE_DTS := qcom,ipq5332-jd-be6500
+  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom
+endef
+TARGET_DEVICES += jd-be6500
+EOF
           
           if grep -q "jd-be6500" "$MAKEFILE"; then
             echo "✅ 设备树已添加到Makefile"
@@ -372,16 +281,13 @@ jobs:
           echo "❌ 自定义脚本不存在: $DIY_P2_SH"
         fi
 
-    - name: 清理可能的损坏包信息（新增步骤）
+    - name: 清理可能的损坏包信息
       run: |
         cd $OPENWRT_PATH
         echo "清理可能的损坏包信息..."
         
         # 清理package索引缓存
         rm -rf .package-lists/
-        
-        # 检查并清理损坏的Makefile
-        find package feeds -name "Makefile" -exec grep -q "^#" {} \; -exec echo "清理注释开头的Makefile: {}" \; -exec rm -f {} \; || true
         
         # 检查并修复package目录权限
         chmod -R 755 package feeds
@@ -516,7 +422,7 @@ jobs:
     - name: 固件完整性检查（多级路径检测 - 关键修正）
       run: |
         cd $OPENWRT_PATH
-        # 检测ipq807x目标固件路径（修正命名错误）
+        # 检测ipq807x目标固件路径
         FIRMWARE_PATH=$(find . -type d -name "ipq807x" 2>/dev/null | head -n1)
         if [ -n "$FIRMWARE_PATH" ]; then
           FIRMWARE_PATH="$FIRMWARE_PATH/generic"
@@ -551,7 +457,7 @@ jobs:
         
         echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
         
-        # 检查关键固件文件（修正命名规则）
+        # 检查关键固件文件
         REQUIRED_FILES=(
           "openwrt-$ARCH-$SUBARCH-generic-jd-be6500-squashfs-sysupgrade.bin"
           "openwrt-$ARCH-$SUBARCH-generic-rootfs.tar.gz"
@@ -630,4 +536,5 @@ jobs:
         draft: false
         prerelease: false
       env:
-        GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}    
+        GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}
+    
