@@ -61,7 +61,7 @@ env:
   # GitHub认证令牌（从仓库秘密获取）
   GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}                  
   # 缓存目录
-  CACHE_DIR: ${{ github.workspace }}/.cache/openwrt       
+  CACHE_DIR: ${{ github.workspace }}/openwrt       
 
 # 作业定义
 jobs:
