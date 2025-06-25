@@ -49,7 +49,7 @@ env:
   # 自定义脚本2
   DIY_P2_SH: diy-part2.sh                                
   # 是否上传二进制目录
-  UPLOAD_BIN_DIR: true                                  
+  UPLOAD_BIN_DIR: false                                  
   # 是否上传固件
   UPLOAD_FIRMWARE: true                                  
   # 是否发布到Release
@@ -71,19 +71,91 @@ jobs:
     runs-on: ubuntu-22.04                                 
 
     steps:
-      - name: 缓存依赖包（加速编译）
-        uses: actions/cache@v3
-        with:
-          # 缓存路径
-          path: ${{ env.CACHE_DIR }}
-          # 缓存键（基于配置文件和目标架构）
-          key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('feeds.conf.default', '.config', 'target/linux/ipq5332/**') }}
-          # 缓存恢复键
-          restore-keys: |
-            ${{ runner.os }}-openwrt-dl-
-    
-      - name: 检查环境
-        run: |
-          sleep 60s
-          ls ${{ github.workspace }}/.cache/openwrt
-    
+    - name: 检查环境
+      run: |
+        # 显示磁盘空间使用情况
+        df -hT
+        # 显示内存使用情况
+        free -h
+        # 显示CPU信息
+        cat /proc/cpuinfo
+        # 显示操作系统信息
+        cat /etc/os-release
+
+    - name: 安装OpenWrt编译依赖
+      run: |
+        # 更新软件包列表
+        sudo apt-get update
+        # 安装编译所需的系统包
+        sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
+          gettext git java-propose-classpath libelf-dev libncurses5-dev \
+          libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools \
+          python3-dev rsync subversion swig time unzip wget xmlto zlib1g-dev \
+          quilt autopoint libtool-bin gperf flex bison gettext-base asciidoc dos2unix \
+          python3-pyelftools python3-pip
+        # 安装Python依赖包
+        pip install pyelftools
+
+    - name: 配置Git凭证
+      run: |
+        # 配置Git凭证助手
+        git config --global credential.helper store
+        # 写入Git凭证（使用GITHUB_TOKEN）
+        echo "https://${GITHUB_TOKEN}:@github.com" > ~/.git-credentials
+        # 输出配置完成信息
+        echo "Git凭证已配置"
+    - name: 清理工作目录
+      run: |
+        # 删除现有openwrt目录
+        rm -rf openwrt
+        # 创建新的openwrt目录
+        mkdir -p openwrt
+    - name: 克隆Lienol仓库（带重试机制）
+      run: |
+        # 清理旧仓库目录
+        rm -rf openwrt
+        # 循环尝试克隆仓库（最多5次）
+        for i in {1..5}; do
+          # 输出当前尝试次数
+          echo "=== 第 $i 次克隆尝试 ==="
+          # 克隆仓库（深度1，指定分支）
+          git clone --depth=1 $LIENOL_REPO -b $LIENOL_BRANCH openwrt
+          # 检查克隆是否成功
+          if [ $? -eq 0 ]; then
+            echo "✅ 仓库克隆成功"
+            break
+          fi
+          # 克隆失败时的提示和等待
+          echo "❌ 克隆失败，15秒后重试..."
+          sleep 15
+        done
+        # 检查是否成功克隆
+        if [ ! -d "openwrt" ]; then
+          echo "💥 五次克隆失败，退出"
+          exit 1
+        fi
+        # 进入openwrt目录
+        cd openwrt
+        # 设置OPENWRT_PATH环境变量
+        echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
+        # 显示最新提交信息
+        git log -1
+         # 确保克隆到正确目录
+        if [ ! -d ".git" ]; then
+         echo "❌ 克隆目录不正确，退出"
+         exit 1
+         fi
+
+    - name: 缓存依赖包（加速编译）
+      uses: actions/cache@v3
+      with:
+        # 缓存路径
+        path: ${{ env.CACHE_DIR }}
+        # 缓存键（基于配置文件和目标架构）
+        key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('feeds.conf.default', '.config', 'target/linux/ipq5332/**') }}
+        # 缓存恢复键
+        restore-keys: |
+          ${{ runner.os }}-openwrt-dl-
+    - name: test
+      run: | 
+        ls ${{ github.workspace }}/.cache/openwrt
