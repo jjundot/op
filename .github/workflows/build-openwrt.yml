@@ -158,4 +158,4 @@ jobs:
           ${{ runner.os }}-openwrt-dl-
     - name: test
       run: | 
-        ls ${{ github.workspace }}/.cache/openwrt
+        ls ${{ github.workspace }}/openwrt
