@@ -84,5 +84,5 @@ jobs:
     
       - name: 检查环境
         run: |
-          ls $${{ github.workspace }}/.cache/openwrt
+          ls ${{ github.workspace }}/.cache/openwrt
     
