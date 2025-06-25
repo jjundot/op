@@ -182,6 +182,7 @@ jobs:
         done
         
         # 按优先级安装Feeds（官方源优先）
+        ./scripts/feeds install -p base -p packages -p luci -p wireless -p qca -p routing -p telephony
         ./scripts/feeds install -p packages 
         ./scripts/feeds install  -p luci 
         ./scripts/feeds install  -p routing 
@@ -192,6 +193,18 @@ jobs:
         #./scripts/feeds install -p qca kmod-ath11k-ct kmod-ath11k-firmware-qca64 kmod-qca-nss-drv kmod-qca-nss-gmac kmod-qca-ppe kmod-thermal-qcom
         ./scripts/feeds install -p wireless kmod-ath11k-ct kmod-ath11k-firmware-qca64
         ./scripts/feeds install -p qca kmod-qca-nss-drv kmod-qca-nss-gmac kmod-qca-ppe kmod-thermal-qcom
+
+        # 明确从wireless源安装Wi-Fi驱动
+        ./scripts/feeds install -p wireless kmod-ath11k-ct kmod-ath11k-firmware-qca64
+    
+        # 从qca源安装网络驱动
+        ./scripts/feeds install -p qca kmod-qca-nss-drv kmod-qca-nss-gmac kmod-qca-ppe kmod-thermal-qcom
+    
+        # 安装缺失的基础依赖
+        ./scripts/feeds install -p packages libpam luci-base liblzma libnetsnmp
+   
+        # 安装Samba相关依赖
+        ./scripts/feeds install -p luci luci-app-samba luci-app-samba4 wsdd
         
         # 驱动存在性验证
         if ! ls feeds | grep -q "kmod-ath11k-ct"; then
