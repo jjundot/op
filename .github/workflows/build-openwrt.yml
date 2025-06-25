@@ -92,7 +92,7 @@ jobs:
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
         git log -1
          # 确保克隆到正确目录
-        if [ ! -d "openwrt/.git" ]; then
+        if [ ! -d ".git" ]; then
          echo "❌ 克隆目录不正确，退出"
          exit 1
          fi
