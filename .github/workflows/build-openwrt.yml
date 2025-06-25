@@ -35,7 +35,7 @@ env:
   # 使用的OpenWrt分支
   #LIENOL_BRANCH: 23.05   
   OPENWRT_REPO: https://git.openwrt.org/openwrt/openwrt.git          
-  OPENWRT_BRANCH: openwrt-23.05.0  
+  OPENWRT_BRANCH: openwrt-23.05  
   # 目标架构
   ARCH: ipq5332                                          
   # 子架构
