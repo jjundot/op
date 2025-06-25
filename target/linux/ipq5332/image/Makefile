@@ -1,5 +1,5 @@
 define Device/jd-be6500
-  $(Device/ipq5332)
+  $(Device/ipq807x)
   DEVICE_TITLE := JD BE6500 (IPQ5332)
   DEVICE_DTS := qcom,ipq5332-jd-be6500
   DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom
