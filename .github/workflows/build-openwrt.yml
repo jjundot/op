@@ -1,24 +1,4 @@
-Skip to content
-Navigation Menu
-gsy-tt
-op
 
-Type / to search
-Code
-Issues
-Pull requests
-Actions
-Projects
-Wiki
-Security
-Insights
-Settings
-Build OpenWrt for JD BE6500 (IPQ5332)
-Build OpenWrt for JD BE6500 (IPQ5332) #65
-Jobs
-Run details
-Workflow file for this run
-.github/workflows/build-openwrt.yml at 719c630
 name: Build OpenWrt for JD BE6500 (IPQ5332)
 
 on:
