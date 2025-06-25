@@ -5,6 +5,7 @@ src-git luci https://git.openwrt.org/openwrt/luci.git#openwrt-23.05
 src-git packages https://git.openwrt.org/openwrt/packages.git#openwrt-23.05
 src-git routing https://git.openwrt.org/openwrt/routing.git#openwrt-23.05
 src-git telephony https://git.openwrt.org/openwrt/telephony.git#openwrt-23.05
+src-git wireless https://git.openwrt.org/openwrt/wireless.git#openwrt-23.05
 
 # qca仓库（修正分支指定）
 src-git qca https://git.openwrt.org/project/qca.git#openwrt-23.05
