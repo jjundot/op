@@ -335,7 +335,7 @@ jobs:
         fi
     - name: 固件完整性检查（精准定位目标目录）
       run: |
-        cd $OPENWRT_PATH/bin/targets
+        cd $OPENWRT_PATH
         # 动态定位ipq807x目标目录
         IPQ807X_DIR=$(find . -type d -name "ipq807x" 2>/dev/null)
         if [ -z "$IPQ807X_DIR" ]; then
