@@ -106,7 +106,7 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-openwrt-dl-
 
-    - name: 智能Feeds配置（去重+官方源优先）
+    - name: 智能Feeds配置（去重官方源优先）
       run: |
         cd $OPENWRT_PATH
         cp $FEEDS_CONF ${FEEDS_CONF}.bak  # 备份原配置
@@ -173,7 +173,7 @@ jobs:
         #./scripts/feeds install -f -p qca kmod-qca-nss-gmac 
         #./scripts/feeds install -f -p qca kmod-qca-ppe 
         #./scripts/feeds install -f -p qca kmod-thermal-qcom
-        +   # 先检查qca feed中是否存在驱动
+        # 先检查qca feed中是否存在驱动
         if ./scripts/feeds list | grep -q "kmod-ath11k-ct"; then
           ./scripts/feeds install -f -p qca kmod-ath11k-ct kmod-ath11k-firmware-qca64
         else
