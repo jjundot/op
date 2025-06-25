@@ -1,635 +1,80 @@
+# 工作流名称：为JD BE6500 (IPQ5332)构建OpenWrt固件
 name: Build OpenWrt for JD BE6500 (IPQ5332)
 
+# 触发条件配置
 on:
+  # 手动触发工作流，可配置输入参数
   workflow_dispatch:  
+    # 输入参数：是否包含WSDD2 (SMB3支持)
     inputs:
       with_wsdd2:
         description: '编译包含 WSDD2 (SMB3 支持)'
         required: false
         default: 'true'
         type: boolean
+      # 输入参数：是否包含Samba4
       with_samba4:
         description: '编译包含 Samba4'
         required: false
         default: 'true'
         type: boolean
+      # 输入参数：是否包含Docker支持
       with_docker:
         description: '编译包含 Docker 支持'
         required: false
         default: 'true'
         type: boolean
+  # 当发布新版本时触发工作流
   release:
     types: published  
 
+# 全局环境变量配置
 env:
+  # Lienol的OpenWrt仓库地址
   LIENOL_REPO: https://github.com/Lienol/openwrt          
+  # 使用的OpenWrt分支
   LIENOL_BRANCH: 23.05                                  
+  # 目标架构
   ARCH: ipq5332                                          
+  # 子架构
   SUBARCH: generic                                       
+  # CPU架构
   CPU_ARCH: aarch64_cortex-a53                           
+  # Feeds配置文件
   FEEDS_CONF: feeds.conf.default                         
+  # 编译配置文件
   CONFIG_FILE: .config                                   
+  # 自定义脚本1
   DIY_P1_SH: diy-part1.sh                                
+  # 自定义脚本2
   DIY_P2_SH: diy-part2.sh                                
-  UPLOAD_BIN_DIR: false                                  
+  # 是否上传二进制目录
+  UPLOAD_BIN_DIR: true                                  
+  # 是否上传固件
   UPLOAD_FIRMWARE: true                                  
+  # 是否发布到Release
   UPLOAD_RELEASE: true                                   
+  # 是否上传到CDN
   UPLOAD_CDN: false                                      
+  # 时区设置
   TZ: Asia/Shanghai                                      
+  # GitHub认证令牌（从仓库秘密获取）
   GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}                  
+  # 缓存目录
   CACHE_DIR: ${{ github.workspace }}/.cache/openwrt       
 
+# 作业定义
 jobs:
+  # 编译作业
   build:
+    # 运行环境：Ubuntu 22.04
     runs-on: ubuntu-22.04                                 
 
     steps:
     - name: 检查环境
       run: |
-        df -hT
-        free -h
-        cat /proc/cpuinfo
-        cat /etc/os-release
-
-    - name: 安装OpenWrt编译依赖
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
-          gettext git java-propose-classpath libelf-dev libncurses5-dev \
-          libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools \
-          python3-dev rsync subversion swig time unzip wget xmlto zlib1g-dev \
-          quilt autopoint libtool-bin gperf flex bison gettext-base asciidoc dos2unix \
-          python3-pyelftools python3-pip
-        pip install pyelftools
-
-    - name: 配置Git凭证
-      run: |
-        git config --global credential.helper store
-        echo "https://${GITHUB_TOKEN}:@github.com" > ~/.git-credentials
-        echo "Git凭证已配置"
-    - name: 清理工作目录
-      run: |
-        rm -rf openwrt
-        mkdir -p openwrt
-    - name: 克隆Lienol仓库（带重试机制）
-      run: |
-        rm -rf openwrt
-        for i in {1..5}; do
-          echo "=== 第 $i 次克隆尝试 ==="
-          git clone --depth=1 $LIENOL_REPO -b $LIENOL_BRANCH openwrt
-          if [ $? -eq 0 ]; then
-            echo "✅ 仓库克隆成功"
-            break
-          fi
-          echo "❌ 克隆失败，15秒后重试..."
-          sleep 15
-        done
-        if [ ! -d "openwrt" ]; then
-          echo "💥 五次克隆失败，退出"
-          exit 1
-        fi
-        cd openwrt
-        echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
-        git log -1
-         # 确保克隆到正确目录
-        if [ ! -d ".git" ]; then
-         echo "❌ 克隆目录不正确，退出"
-         exit 1
-         fi
-
-    - name: 缓存依赖包（加速编译）
-      uses: actions/cache@v3
-      with:
-        path: ${{ env.CACHE_DIR }}
-        # key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/dl/**', 'feeds.conf.default', '.config') }}
-        key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('feeds.conf.default', '.config', 'target/linux/ipq5332/**') }}
-        restore-keys: |
-          ${{ runner.os }}-openwrt-dl-
-
-    - name: 智能Feeds配置（去重官方源优先）
-      run: |
-        cd $OPENWRT_PATH
-        cp $FEEDS_CONF ${FEEDS_CONF}.bak  # 备份原配置
-        #> $FEEDS_CONF  # 清空现有配置，重新构建
-        # 先移除重复源（可选）
-        grep -v "lienol\|packages\|luci\|qca" $FEEDS_CONF > ${FEEDS_CONF}.tmp
-        mv ${FEEDS_CONF}.tmp $FEEDS_CONF
-        
-        # 添加Lienol官方源
-        echo "src-git lienol https://github.com/Lienol/openwrt-package" >> $FEEDS_CONF
-        
-        # OpenWrt官方源（明确版本，避免冲突）
-        #echo "src-git packages https://git.openwrt.org/feed/packages.git^openwrt-23.05" >> $FEEDS_CONF
-        #echo "src-git luci https://git.openwrt.org/project/luci.git^openwrt-23.05" >> $FEEDS_CONF
-        echo "src-git packages1 https://git.openwrt.org/feed/packages.git#openwrt-23.05" >> $FEEDS_CONF
-        echo "src-git luci1 https://git.openwrt.org/project/luci.git#openwrt-23.05" >> $FEEDS_CONF
-        echo "src-git routing1 https://git.openwrt.org/feed/routing.git#openwrt-23.05" >> $FEEDS_CONF
-        echo "src-git telephony1 https://git.openwrt.org/feed/telephony.git#openwrt-23.05" >> $FEEDS_CONF
-        echo "src-git wireless1 https://git.openwrt.org/feed/wireless.git#openwrt-23.05" >> $FEEDS_CONF
-        
-        # IPQ5332专属驱动源（官方QCA仓库）
-        #echo "src-git qca https://git.openwrt.org/project/qca.git^openwrt-23.05" >> $FEEDS_CONF
-        echo "src-git qca https://git.openwrt.org/project/qca.git#openwrt-23.05" >> $FEEDS_CONF
-        # 添加第三方软件包源
-        echo "src-git kenzo1 https://github.com/kenzok8/openwrt-packages#openwrt-23.05" >> $FEEDS_CONF
-        echo "src-git small1 https://github.com/kenzok8/small#openwrt-23.05" >> $FEEDS_CONF
-        echo "src-git passwall1 https://github.com/xiaorouji/openwrt-passwall#master" >> $FEEDS_CONF
-        echo "src-git helloworld1 https://github.com/fw876/helloworld#master" >> $FEEDS_CONF
-        
-        echo "=== 最终Feeds配置 ==="
+        cat $DIY_P1_SH
+        cat $DIY_P2_SH
         cat $FEEDS_CONF
 
-    - name: 依赖强化安装（官方源优先，debug级输出）
-      run: |
-        cd $OPENWRT_PATH
-        rm -rf feeds/*  # 清理旧Feeds
-        
-        # 多轮更新（应对网络波动）
-        for i in {1..3}; do
-          echo "=== 第 $i 次Feeds更新 ==="
-          rm -rf feeds/*
-          ./scripts/feeds update  2>&1 | tee feeds_update_${i}.log
-          if [ $? -eq 0 ]; then
-            break
-          fi
-          echo "更新失败，10秒后重试..."
-          sleep 10
-        done
-        
-        # 按优先级安装Feeds（确保官方包优先）
-        ./scripts/feeds install -p packages 
-        ./scripts/feeds install  -p luci 
-        ./scripts/feeds install  -p routing 
-        ./scripts/feeds install  -p telephony 
-        ./scripts/feeds install  -p wireless 
-        ./scripts/feeds install  -p qca 
-        # 优先安装QCA驱动
-        ./scripts/feeds install -p qca kmod-ath11k-ct kmod-ath11k-firmware-qca64 kmod-qca-nss-drv kmod-qca-nss-gmac kmod-qca-ppe kmod-thermal-qcom
-        
-        # 强制安装IPQ5332关键驱动
-        #./scripts/feeds install -f -p wireless kmod-ath11k-ct 
-        #./scripts/feeds install -f -p wireless kmod-ath11k-firmware-qca64 
-        #./scripts/feeds install -f -p qca kmod-qca-nss-drv 
-        #./scripts/feeds install -f -p qca kmod-qca-nss-gmac 
-        #./scripts/feeds install -f -p qca kmod-qca-ppe 
-        #./scripts/feeds install -f -p qca kmod-thermal-qcom
-        # 先检查qca feed中是否存在驱动
-        if ./scripts/feeds list | grep -q "kmod-ath11k-ct"; then
-          ./scripts/feeds install -f -p qca kmod-ath11k-ct kmod-ath11k-firmware-qca64
-        else
-          ./scripts/feeds install -f -p wireless kmod-ath11k-ct kmod-ath11k-firmware-qca64
-        fi
-        ./scripts/feeds install -f -p qca kmod-qca-nss-drv kmod-qca-nss-gmac kmod-qca-ppe kmod-thermal-qcom
-
-        # 驱动存在性验证
-        if ! ls feeds | grep -q "kmod-ath11k-ct"; then
-          echo "❌ 关键驱动kmod-ath11k-ct未安装，退出"
-          exit 1
-        fi
-        if ! ls feeds | grep -q "kmod-qca-nss-drv"; then
-          echo "❌ 关键驱动kmod-qca-nss-drv未安装，退出"
-          exit 1
-        fi
-        
-        # 安装第三方软件包
-        ./scripts/feeds install -a -p kenzo 
-        ./scripts/feeds install -a -p small 
-        
-        # 检查IPQ5332驱动是否存在
-        if ! ./scripts/feeds list | grep -q "kmod-ath11k-ct"; then
-          echo "⚠️ 未找到ath11k驱动，强制从wireless源安装..."
-          ./scripts/feeds install -f -p wireless kmod-ath11k-ct 
-          
-          # 再次检查
-          if ! ./scripts/feeds list | grep -q "kmod-ath11k-ct"; then
-            echo "❌ 仍未找到驱动，手动构建ath11k-ct Makefile..."
-            mkdir -p package/kernel/ath11k-ct
-            
-            # 逐行生成Makefile（无cat EOF）
-            echo 'include $(TOPDIR)/rules.mk' > package/kernel/ath11k-ct/Makefile
-            echo 'include $(INCLUDE_DIR)/kernel.mk' >> package/kernel/ath11k-ct/Makefile
-            echo '' >> package/kernel/ath11k-ct/Makefile
-            echo 'PKG_NAME:=ath11k-ct' >> package/kernel/ath11k-ct/Makefile
-            echo 'PKG_VERSION:=2023.05' >> package/kernel/ath11k-ct/Makefile
-            echo 'PKG_RELEASE:=1' >> package/kernel/ath11k-ct/Makefile
-            echo '' >> package/kernel/ath11k-ct/Makefile
-            echo 'PKG_SOURCE_URL:=https://git.openwrt.org/project/libs/ath11k-ct.git' >> package/kernel/ath11k-ct/Makefile
-            echo 'PKG_SOURCE_PROTO:=git' >> package/kernel/ath11k-ct/Makefile
-            echo 'PKG_SOURCE_VERSION:=openwrt-23.05' >> package/kernel/ath11k-ct/Makefile
-            echo 'PKG_MIRROR_HASH:=skip' >> package/kernel/ath11k-ct/Makefile
-            echo '' >> package/kernel/ath11k-ct/Makefile
-            echo 'PKG_MAINTAINER:=John Doe <john@example.com>' >> package/kernel/ath11k-ct/Makefile
-            echo 'PKG_LICENSE:=GPL-2.0-only' >> package/kernel/ath11k-ct/Makefile
-            echo 'PKG_LICENSE_FILES:=LICENSE' >> package/kernel/ath11k-ct/Makefile
-            echo '' >> package/kernel/ath11k-ct/Makefile
-            echo 'include $(INCLUDE_DIR)/package.mk' >> package/kernel/ath11k-ct/Makefile
-            echo '' >> package/kernel/ath11k-ct/Makefile
-            echo 'define KernelPackage/ath11k-ct' >> package/kernel/ath11k-ct/Makefile
-            echo '  SUBMENU:=Wireless Drivers' >> package/kernel/ath11k-ct/Makefile
-            echo '  TITLE:=Atheros ath11k wireless driver (CT version)' >> package/kernel/ath11k-ct/Makefile
-            echo '  DEPENDS:=+kmod-cfg80211 +kmod-usb-core +kmod-mac80211' >> package/kernel/ath11k-ct/Makefile
-            echo '  KCONFIG:= \' >> package/kernel/ath11k-ct/Makefile
-            echo '    CONFIG_ATH11K=m \' >> package/kernel/ath11k-ct/Makefile
-            echo '    CONFIG_ATH11K_DEBUGFS=n \' >> package/kernel/ath11k-ct/Makefile
-            echo '    CONFIG_ATH11K_TRACE=n' >> package/kernel/ath11k-ct/Makefile
-            echo '  FILES:=$(PKG_BUILD_DIR)/compat.ko $(PKG_BUILD_DIR)/ath11k.ko' >> package/kernel/ath11k-ct/Makefile
-            echo '  AUTOLOAD:=$(call AutoProbe,ath11k)' >> package/kernel/ath11k-ct/Makefile
-            echo 'endef' >> package/kernel/ath11k-ct/Makefile
-            echo '' >> package/kernel/ath11k-ct/Makefile
-            echo 'define KernelPackage/ath11k-ct/description' >> package/kernel/ath11k-ct/Makefile
-            echo '  This package contains the Atheros ath11k wireless driver' >> package/kernel/ath11k-ct/Makefile
-            echo '  for newer Qualcomm Atheros chipsets.' >> package/kernel/ath11k-ct/Makefile
-            echo 'endef' >> package/kernel/ath11k-ct/Makefile
-            echo '' >> package/kernel/ath11k-ct/Makefile
-            echo '$(eval $(call KernelPackage,ath11k-ct))' >> package/kernel/ath11k-ct/Makefile
-            
-            echo "✅ 手动构建ath11k-ct Makefile完成"
-          else
-            echo "✅ 从wireless源强制安装ath11k驱动成功"
-          fi
-        else
-          echo "✅ IPQ5332 Wi-Fi驱动已通过Feeds安装"
-        fi
-
-    - name: 基础配置生成（强制目标平台）
-      run: |
-        cd $OPENWRT_PATH
-        if [ -f "$CONFIG_FILE" ]; then
-          echo "✅ 发现已有.config，更新目标平台配置"
-          cp $CONFIG_FILE ${CONFIG_FILE}.bak
-          sed -i '/CONFIG_TARGET_IPQ807X/d' $CONFIG_FILE
-          sed -i '/CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500/d' $CONFIG_FILE
-        else
-          echo "❌ 未发现.config，生成默认配置"
-          make defconfig
-        fi
-        
-        # 强制写入目标平台配置
-        echo "CONFIG_TARGET_IPQ807X=y" >> $CONFIG_FILE
-        echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> $CONFIG_FILE
-        echo "CONFIG_TARGET_DEVICE_PACKAGES_jd-be6500=\"kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom\"" >> $CONFIG_FILE
-        echo "CONFIG_TARGET_KERNEL_PARTSIZE=32" >> $CONFIG_FILE
-        echo "CONFIG_TARGET_ROOTFS_PARTSIZE=256" >> $CONFIG_FILE
-        
-        echo "=== 当前.config 设备配置 ==="
-        grep -E "CONFIG_TARGET_IPQ807X_DEVICE|CONFIG_TARGET_DEVICE_PACKAGES" .config
-
-    - name: 设备树强制关联（纯echo实现）
-      run: |
-        cd $OPENWRT_PATH
-        DTS_DIR="target/linux/$ARCH/dts"
-        mkdir -p "$DTS_DIR"
-        DEVICE_TREE="$DTS_DIR/qcom,ipq5332-jd-be6500.dts"
-        
-        # 生成设备树文件（无cat EOF）
-        if [ ! -f "$DEVICE_TREE" ]; then
-          echo "/dts-v1/;" > "$DEVICE_TREE"
-          echo "#include \"qcom,ipq5332.dtsi\"" >> "$DEVICE_TREE"
-          echo "#include \"ipq807x.dtsi\"" >> "$DEVICE_TREE"
-          echo "" >> "$DEVICE_TREE"
-          echo "/ {" >> "$DEVICE_TREE"
-          echo "    model = \"JD BE6500\";" >> "$DEVICE_TREE"
-          echo "    compatible = \"qcom,ipq5332\", \"qcom,ipq5000\", \"qcom,ipq807x\";" >> "$DEVICE_TREE"
-          echo "    /* Ethernet ports */" >> "$DEVICE_TREE"
-          echo "    ethernet@a4000000 {" >> "$DEVICE_TREE"
-          echo "        compatible = \"qcom,ipq5332-gmac\";" >> "$DEVICE_TREE"
-          echo "        reg = <0xa4000000 0x10000>;" >> "$DEVICE_TREE"
-          echo "        interrupts = <0 36 4>;" >> "$DEVICE_TREE"
-          echo "        qcom,mdio-bus = <&mdio>;" >> "$DEVICE_TREE"
-          echo "        qcom,phy-handle = <&ethphy0>;" >> "$DEVICE_TREE"
-          echo "    };" >> "$DEVICE_TREE"
-          echo "    mdio@a4002000 {" >> "$DEVICE_TREE"
-          echo "        compatible = \"qcom,ipq5332-mdio\";" >> "$DEVICE_TREE"
-          echo "        reg = <0xa4002000 0x1000>;" >> "$DEVICE_TREE"
-          echo "        #address-cells = <1>;" >> "$DEVICE_TREE"
-          echo "        #size-cells = <0>;" >> "$DEVICE_TREE"
-          echo "        ethphy0: ethernet-phy@0 {" >> "$DEVICE_TREE"
-          echo "            reg = <0>;" >> "$DEVICE_TREE"
-          echo "        };" >> "$DEVICE_TREE"
-          echo "    };" >> "$DEVICE_TREE"
-          echo "    /* 此处可扩展完整设备树内容 */" >> "$DEVICE_TREE"
-          echo "};" >> "$DEVICE_TREE"
-          echo "✅ 生成设备树: $DEVICE_TREE"
-        else
-          echo "✅ 设备树已存在: $DEVICE_TREE"
-        fi
-        
-        # 关联设备树到Makefile（纯echo实现）
-        MAKEFILE="target/linux/$ARCH/image/Makefile"
-        if ! grep -q "jd-be6500" "$MAKEFILE"; then
-          echo "❌ 设备树未关联，手动添加定义..."
-          cp "$MAKEFILE" "${MAKEFILE}.bak"  # 备份原文件
-          
-          # 逐行添加设备定义
-          echo 'define Device/jd-be6500' >> "$MAKEFILE"
-          echo '  $(Device/ipq807x)' >> "$MAKEFILE"
-          echo '  DEVICE_TITLE := JD BE6500 (IPQ5332)' >> "$MAKEFILE"
-          echo '  DEVICE_DTS := qcom,ipq5332-jd-be6500' >> "$MAKEFILE"
-          echo '  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom' >> "$MAKEFILE"
-          echo '  IMAGE_SIZE := 256m' >> "$MAKEFILE"
-          echo '  IMAGES := sysupgrade.bin factory.bin' >> "$MAKEFILE"
-          echo '  IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-to \$$(IMAGE_SIZE) | check-size \$$(IMAGE_SIZE)' >> "$MAKEFILE"
-          echo '  IMAGE/factory.bin := append-kernel | append-rootfs | pad-to \$$(IMAGE_SIZE) | check-size \$$(IMAGE_SIZE)' >> "$MAKEFILE"
-          echo 'endef' >> "$MAKEFILE"
-          echo 'TARGET_DEVICES += jd-be6500' >> "$MAKEFILE"
-          
-          if grep -q "jd-be6500" "$MAKEFILE"; then
-            echo "✅ 设备树已关联到Makefile"
-          else
-            echo "❌ 设备树关联失败，退出构建"
-            exit 1
-          fi
-        else
-          echo "✅ 设备树已关联到Makefile"
-        fi
-
-    - name: 应用自定义脚本（容错处理）
-      run: |
-        cd $OPENWRT_PATH
-        for SCRIPT in $DIY_P1_SH $DIY_P2_SH; do
-          if [ -f "$SCRIPT" ]; then
-            echo "执行自定义脚本: $SCRIPT"
-            chmod +x "$SCRIPT"
-            ./$SCRIPT || echo "⚠️ 自定义脚本 $SCRIPT 执行失败，继续构建"
-          else
-            echo "❌ 未找到自定义脚本: $SCRIPT"
-          fi
-        done
-
-    - name: 下载依赖包（缓存+校验）
-      run: |
-        cd $OPENWRT_PATH
-        if [ -d "${{ env.CACHE_DIR }}/dl" ]; then
-          echo "使用缓存依赖包..."
-          cp -rf "${{ env.CACHE_DIR }}/dl" .
-        fi
-        
-        make download -j$(nproc) V=s
-        DOWNLOAD_STATUS=$?
-        
-        mkdir -p "${{ env.CACHE_DIR }}/dl"
-        cp -rf dl/* "${{ env.CACHE_DIR }}/dl/"
-        find dl -size -1024c -exec rm -f {} \;  # 清理空文件
-        
-        if [ $DOWNLOAD_STATUS -ne 0 ]; then
-          echo "⚠️ 依赖下载异常，继续构建（可能影响结果）"
-          find dl -type f -empty -exec echo "空文件: {}" \;
-        else
-          echo "✅ 依赖下载完成（共 $(find dl -type f | wc -l) 个文件）"
-        fi
-
-    - name: 编译固件（双阶段+详细日志）
-      run: |
-        cd $OPENWRT_PATH
-        JOBS=$(nproc)
-        [ $JOBS -gt 4 ] && JOBS=4  # 限制线程数
-        
-        # 阶段1：并行编译
-        echo "开始并行编译（-j$JOBS）..."
-        make -j$JOBS V=s 2>&1 | tee compile_phase1.log
-        PHASE1_STATUS=$?
-        
-        if [ $PHASE1_STATUS -ne 0 ]; then
-          echo "❌ 并行编译失败，切换单线程重试..."
-          make -j1 V=s 2>&1 | tee compile_phase2.log
-          PHASE2_STATUS=$?
-          
-          if [ $PHASE2_STATUS -ne 0 ]; then
-            echo "💥 编译失败，收集错误日志..."
-            mkdir -p error_logs
-            cp compile_phase*.log error_logs/
-            cp $(find . -name "*.err" -or -name "*.log" -or -name "*.rej") error_logs/ 2>/dev/null
-            cp .config error_logs/
-            cp target/linux/ipq807x/image/Makefile error_logs/
-            tar -czf error_logs.tar.gz error_logs
-            exit 1
-          else
-            echo "✅ 单线程编译成功"
-          fi
-        else
-          echo "✅ 并行编译成功"
-        fi
-
-    - name: 关键修复：强制设置设备定义
-      run: |
-        cd $OPENWRT_PATH
-        MAKEFILE="target/linux/$ARCH/image/Makefile"
-        
-        # 确保设备定义存在
-        if ! grep -q "define Device/jd-be6500" "$MAKEFILE"; then
-          echo "❌ 未找到设备定义，添加正确配置..."
-          
-          # 备份原文件
-          cp "$MAKEFILE" "${MAKEFILE}.bak"
-          
-          # 添加设备定义（继承自ipq807x）
-          echo 'define Device/jd-be6500' >> "$MAKEFILE"
-          echo '  $(Device/ipq807x)' >> "$MAKEFILE"
-          echo '  DEVICE_TITLE := JD BE6500 (IPQ5332)' >> "$MAKEFILE"
-          echo '  DEVICE_DTS := qcom,ipq5332-jd-be6500' >> "$MAKEFILE"
-          echo '  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom' >> "$MAKEFILE"
-          echo '  IMAGE_SIZE := 256m' >> "$MAKEFILE"
-          echo '  IMAGES := sysupgrade.bin factory.bin' >> "$MAKEFILE"
-          echo '  IMAGE/sysupgrade.bin := append-kernel | append-rootfs | pad-to \$$(IMAGE_SIZE) | check-size \$$(IMAGE_SIZE)' >> "$MAKEFILE"
-          echo '  IMAGE/factory.bin := append-kernel | append-rootfs | pad-to \$$(IMAGE_SIZE) | check-size \$$(IMAGE_SIZE)' >> "$MAKEFILE"
-          echo 'endef' >> "$MAKEFILE"
-          echo 'TARGET_DEVICES += jd-be6500' >> "$MAKEFILE"
-          
-          echo "✅ 设备定义已更新"
-        else
-          # 修复可能的重复generic定义
-          echo "修复设备定义中的重复generic..."
-          sed -i '/define Device\/jd-be6500/a \  DEVICE_NAME := jd-be6500' "$MAKEFILE"
-          sed -i '/define Device\/jd-be6500/a \  DEVICE_PROFILE := jd-be6500' "$MAKEFILE"
-          sed -i '/define Device\/jd-be6500/a \  DEVICE_FILESYSTEMS := squashfs ext4' "$MAKEFILE"
-          
-          # 确保DEVICE_PACKAGES正确
-          sed -i 's/^ \+DEVICE_PACKAGES.*/  DEVICE_PACKAGES := kmod-ath11k-ct kmod-qca-ppe kmod-qca-nss-drv kmod-qca-nss-gmac kmod-thermal-qcom/' "$MAKEFILE"
-          
-          echo "✅ 设备定义已优化"
-        fi
-
-    - name: 清理.config中的冗余设置
-      run: |
-        cd $OPENWRT_PATH
-        CONFIG_FILE=".config"
-        
-        # 备份原配置
-        cp "$CONFIG_FILE" "${CONFIG_FILE}.bak"
-        
-        # 移除重复的TARGET_GENERIC设置
-        sed -i '/CONFIG_TARGET_GENERIC/d' "$CONFIG_FILE"
-        
-        # 确保正确的设备设置
-        sed -i '/CONFIG_TARGET_IPQ807X/d' "$CONFIG_FILE"
-        sed -i '/CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500/d' "$CONFIG_FILE"
-        
-        echo "CONFIG_TARGET_IPQ807X=y" >> "$CONFIG_FILE"
-        echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> "$CONFIG_FILE"
-        
-        # 移除可能导致重复命名的设置
-        sed -i '/CONFIG_TARGET_IMAGES_PAD/d' "$CONFIG_FILE"
-        sed -i '/CONFIG_TARGET_ROOTFS_PARTSIZE/d' "$CONFIG_FILE"
-        
-        # 确保必要的编译选项
-        echo "CONFIG_ALL_KMODS=y" >> "$CONFIG_FILE"
-        echo "CONFIG_DEVEL=y" >> "$CONFIG_FILE"
-        
-        echo "✅ .config已优化"
-
-    - name: 智能固件路径检测（多路径适配+模糊匹配）
-      id: firmware_path
-      run: |
-        cd $OPENWRT_PATH
-        
-        # 优先检查标准固件生成路径
-        FIRMWARE_PATHS=(
-          "bin/targets/ipq807x/generic"  # 标准固件路径
-          "bin/targets/ipq807x/jd-be6500"  # 新增特定设备路径
-          "bin/targets/qcom/ipq5332"
-          "bin"
-        )
-        
-        # 查找存在的路径
-        FOUND_PATH=""
-        for path in "${FIRMWARE_PATHS[@]}"; do
-          if [ -d "$path" ]; then
-            FOUND_PATH="$path"
-            echo "✅ 找到固件目录: $path"
-            break
-          fi
-        done
-        
-        # 验证路径
-        if [ -z "$FOUND_PATH" ]; then
-          echo "❌ 未找到任何固件目录，可用路径:"
-          find . -type d -name "bin" -o -name "ipq807x" -o -name "qcom" -o -name "generic"
-          exit 1
-        fi
-        
-        # 保存路径到环境变量
-        echo "FIRMWARE_PATH=$FOUND_PATH" >> $GITHUB_ENV
-        echo "firmware_path=$FOUND_PATH" >> $GITHUB_OUTPUT
-        
-        # 优化固件文件匹配模式（更通用的匹配）
-        echo "检查固件文件..."
-        FIRMWARE_PATTERNS=(
-          "jd-be6500-squashfs-sysupgrade.bin"  # 精确匹配
-          "jd-be6500-factory.bin"
-          "ipq5332-jd-be6500-squashfs-sysupgrade.bin"
-          "ipq807x-jd-be6500-squashfs-sysupgrade.bin"
-          "*squashfs-sysupgrade.bin"
-          "*factory.bin"
-        )
-        
-        # 按优先级查找匹配的文件
-        FOUND=false
-        for pattern in "${FIRMWARE_PATTERNS[@]}"; do
-          MATCHING_FILES=($(ls $FOUND_PATH/$pattern 2>/dev/null))
-          if [ ${#MATCHING_FILES[@]} -gt 0 ]; then
-            FIRMWARE_NAME=${MATCHING_FILES[0]}
-            FIRMWARE_FULL_PATH="$FOUND_PATH/${MATCHING_FILES[0]}"
-            
-            echo "✅ 找到匹配的固件文件: $FIRMWARE_NAME"
-            echo "固件名称: $FIRMWARE_NAME"
-            echo "固件路径: $FIRMWARE_FULL_PATH"
-            
-            # 保存到环境变量
-            echo "FIRMWARE_NAME=$FIRMWARE_NAME" >> $GITHUB_ENV
-            echo "FIRMWARE_FULL_PATH=$FIRMWARE_FULL_PATH" >> $GITHUB_ENV
-            echo "firmware_name=$FIRMWARE_NAME" >> $GITHUB_OUTPUT
-            echo "firmware_full_path=$FIRMWARE_FULL_PATH" >> $GITHUB_OUTPUT
-            
-            FOUND=true
-            break
-          fi
-        done
-        
-        if [ "$FOUND" = false ]; then
-          echo "❌ 未找到任何匹配的固件文件，可用文件:"
-          ls -lh $FOUND_PATH/*.bin || true
-          exit 1
-        fi
-
-    - name: 验证固件存在
-      run: |
-        cd $OPENWRT_PATH
-        
-        # 使用保存的变量验证固件
-        if [ -f "${{ env.FIRMWARE_FULL_PATH }}" ]; then
-          echo "✅ 固件存在: ${{ env.FIRMWARE_FULL_PATH }}"
-          echo "固件大小: $(du -h ${{ env.FIRMWARE_FULL_PATH }} | cut -f1)"
-          echo "固件SHA256校验和: $(sha256sum ${{ env.FIRMWARE_FULL_PATH }} | cut -d' ' -f1)"
-        else
-          echo "❌ 固件不存在: ${{ env.FIRMWARE_FULL_PATH }}"
-          echo "可用文件:"
-          ls -lh ${{ env.FIRMWARE_PATH }}/*.bin || true
-          exit 1
-        fi
-
-    - name: 显示目录结构（调试用）
-      run: |
-        cd $OPENWRT_PATH
-        echo "=== 目录结构 ==="
-        find . -type d -name "target" -o -name "bin" -o -name "ipq807x" -o -name "ipq5332" -o -name "qcom" -o -name "generic"
-        
-        echo "=== 固件文件列表 ==="
-        find . -name "*.bin" -o -name "*.img" -o -name "*.tar.gz"
-
-    - name: 生成版本信息
-      id: version
-      run: |
-        cd $OPENWRT_PATH
-        RELEASE_DATE=$(date +%Y%m%d)
-        COMMIT_ID=$(git rev-parse --short HEAD)
-        echo "release_version=OpenWrt_${RELEASE_DATE}_${COMMIT_ID}" >> $GITHUB_ENV
-        echo "release_version=OpenWrt_${RELEASE_DATE}_${COMMIT_ID}" >> $GITHUB_OUTPUT
-        
-        cat <<EOF > version.info
-        OpenWrt 固件 for JD BE6500 (IPQ5332)
-        编译时间: $(date +"%Y-%m-%d %H:%M:%S")
-        Git 提交: $COMMIT_ID
-        分支: $LIENOL_BRANCH
-        目标平台: $ARCH/$SUBARCH
-        固件名称: ${{ env.FIRMWARE_NAME }}
-        固件完整路径: ${{ env.FIRMWARE_FULL_PATH }}
-        固件大小: $(du -h ${{ env.FIRMWARE_FULL_PATH }} | cut -f1)
-        固件SHA256校验和: $(sha256sum ${{ env.FIRMWARE_FULL_PATH }} | cut -d' ' -f1)
-        EOF
-
-    - name: 上传固件到Artifact
-      if: env.UPLOAD_FIRMWARE == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.release_version }}
-        path: |
-          ${{ env.FIRMWARE_FULL_PATH }}
-          ${{ env.FIRMWARE_PATH }}/*.img
-          ${{ env.FIRMWARE_PATH }}/*.tar.gz
-          ${{ env.FIRMWARE_PATH }}/sha256sums
-          version.info
-        retention-days: 30
-        if-no-files-found: error
-      env:
-        FIRMWARE_PATH: ${{ env.FIRMWARE_PATH }}
-        FIRMWARE_NAME: ${{ env.FIRMWARE_NAME }}
-        FIRMWARE_FULL_PATH: ${{ env.FIRMWARE_FULL_PATH }}
-
-    - name: 发布到GitHub Release
-      if: env.UPLOAD_RELEASE == 'true' && github.event_name == 'release'
-      uses: softprops/action-gh-release@v1
-      with:
-        name: ${{ env.release_version }}
-        tag_name: ${{ env.release_version }}
-        body_path: version.info
-        files: |
-          ${{ env.FIRMWARE_FULL_PATH }}
-          ${{ env.FIRMWARE_PATH }}/sha256sums
-          version.info
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}
-        FIRMWARE_PATH: ${{ env.FIRMWARE_PATH }}
-        FIRMWARE_NAME: ${{ env.FIRMWARE_NAME }}
-        FIRMWARE_FULL_PATH: ${{ env.FIRMWARE_FULL_PATH }}
+    
