@@ -451,11 +451,8 @@ jobs:
         # 优先检查标准固件生成路径
         FIRMWARE_PATHS=(
           "bin/targets/ipq807x/generic"  # 标准固件路径
-          "bin/targets/qcom/generic"
-          "target/linux/ipq807x/generic"
-          "target/linux/ipq5332/generic"
-          "target/linux/qcom/generic"
-          "target"
+          "bin/targets/ipq807x/jd-be6500"  # 新增特定设备路径
+          "bin/targets/qcom/ipq5332"
           "bin"
         )
         
@@ -483,12 +480,12 @@ jobs:
         # 优化固件文件匹配模式（更通用的匹配）
         echo "检查固件文件..."
         FIRMWARE_PATTERNS=(
-          "*jd-be6500*squashfs-sysupgrade.bin"
-          "*jd-be6500*factory.bin"
-          "*ipq5332*squashfs-sysupgrade.bin"
-          "*ipq807x*squashfs-sysupgrade.bin"
-          "*qcom*squashfs-sysupgrade.bin"
-          "*ipq*.bin"
+          "jd-be6500-squashfs-sysupgrade.bin"  # 精确匹配
+          "jd-be6500-factory.bin"
+          "ipq5332-jd-be6500-squashfs-sysupgrade.bin"
+          "ipq807x-jd-be6500-squashfs-sysupgrade.bin"
+          "*squashfs-sysupgrade.bin"
+          "*factory.bin"
         )
         
         # 按优先级查找匹配的文件
