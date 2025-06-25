@@ -164,21 +164,15 @@ jobs:
         # 备份原始Feeds配置
         cp $FEEDS_CONF ${FEEDS_CONF}.bak  
         # 移除重复源（保留非lienol/packages/luci/qca的源）
-        grep -v "lienol\|packages\|luci\|qca" $FEEDS_CONF > ${FEEDS_CONF}.tmp
-        mv ${FEEDS_CONF}.tmp $FEEDS_CONF
+        #grep -v "lienol\|packages\|luci\|qca" $FEEDS_CONF > ${FEEDS_CONF}.tmp
+        #mv ${FEEDS_CONF}.tmp $FEEDS_CONF
         
         # 添加Lienol官方软件源
         echo "src-git lienol https://github.com/Lienol/openwrt-package" >> $FEEDS_CONF
         
-        # 添加OpenWrt官方软件源（指定版本）
-        echo "src-git packages1 https://git.openwrt.org/feed/packages.git#openwrt-23.05" >> $FEEDS_CONF
-        echo "src-git luci1 https://git.openwrt.org/project/luci.git#openwrt-23.05" >> $FEEDS_CONF
-        echo "src-git routing1 https://git.openwrt.org/feed/routing.git#openwrt-23.05" >> $FEEDS_CONF
-        echo "src-git telephony1 https://git.openwrt.org/feed/telephony.git#openwrt-23.05" >> $FEEDS_CONF
-        echo "src-git wireless1 https://git.openwrt.org/feed/wireless.git#openwrt-23.05" >> $FEEDS_CONF
         
-        # 添加IPQ5332专属驱动源
-        echo "src-git qca https://git.openwrt.org/project/qca.git#openwrt-23.05" >> $FEEDS_CONF
+        
+        
         # 添加第三方软件包源
         echo "src-git kenzo1 https://github.com/kenzok8/openwrt-packages#openwrt-23.05" >> $FEEDS_CONF
         echo "src-git small1 https://github.com/kenzok8/small#openwrt-23.05" >> $FEEDS_CONF
@@ -221,7 +215,9 @@ jobs:
         ./scripts/feeds install  -p wireless 
         ./scripts/feeds install  -p qca 
         # 优先安装QCA驱动
-        ./scripts/feeds install -p qca kmod-ath11k-ct kmod-ath11k-firmware-qca64 kmod-qca-nss-drv kmod-qca-nss-gmac kmod-qca-ppe kmod-thermal-qcom
+        #./scripts/feeds install -p qca kmod-ath11k-ct kmod-ath11k-firmware-qca64 kmod-qca-nss-drv kmod-qca-nss-gmac kmod-qca-ppe kmod-thermal-qcom
+        ./scripts/feeds install -p wireless kmod-ath11k-ct kmod-ath11k-firmware-qca64
+        ./scripts/feeds install -p qca kmod-qca-nss-drv kmod-qca-nss-gmac kmod-qca-ppe kmod-thermal-qcom
         
         # 驱动存在性验证
         if ! ls feeds | grep -q "kmod-ath11k-ct"; then
