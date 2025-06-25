@@ -31,9 +31,11 @@ on:
 # 全局环境变量配置
 env:
   # Lienol的OpenWrt仓库地址
-  LIENOL_REPO: https://github.com/Lienol/openwrt          
+  #LIENOL_REPO: https://github.com/Lienol/openwrt          
   # 使用的OpenWrt分支
-  LIENOL_BRANCH: 23.05                                  
+  #LIENOL_BRANCH: 23.05   
+  OPENWRT_REPO: https://git.openwrt.org/openwrt/openwrt.git          
+  OPENWRT_BRANCH: openwrt-23.05.0  
   # 目标架构
   ARCH: ipq5332                                          
   # 子架构
@@ -110,7 +112,7 @@ jobs:
         rm -rf openwrt
         # 创建新的openwrt目录
         mkdir -p openwrt
-    - name: 克隆Lienol仓库（带重试机制）
+    - name: 克隆openwrt仓库（带重试机制）
       run: |
         # 清理旧仓库目录
         rm -rf openwrt
@@ -119,7 +121,8 @@ jobs:
           # 输出当前尝试次数
           echo "=== 第 $i 次克隆尝试 ==="
           # 克隆仓库（深度1，指定分支）
-          git clone --depth=1 $LIENOL_REPO -b $LIENOL_BRANCH openwrt
+          #git clone --depth=1 $LIENOL_REPO -b $LIENOL_BRANCH openwrt
+          git clone --depth=1 $OPENWRT_REPO -b $OPENWRT_BRANCH openwrt
           # 检查克隆是否成功
           if [ $? -eq 0 ]; then
             echo "✅ 仓库克隆成功"
