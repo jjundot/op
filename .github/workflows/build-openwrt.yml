@@ -142,7 +142,8 @@ jobs:
         # 多轮更新（应对网络波动）
         for i in {1..3}; do
           echo "=== 第 $i 次Feeds更新 ==="
-          ./scripts/feeds update -a -v 2>&1 | tee feeds_update_${i}.log
+          rm -rf feeds/*
+          ./scripts/feeds update -a  2>&1 | tee feeds_update_${i}.log
           if [ $? -eq 0 ]; then
             break
           fi
@@ -151,20 +152,20 @@ jobs:
         done
         
         # 按优先级安装Feeds（确保官方包优先）
-        ./scripts/feeds install -a -p packages -v
-        ./scripts/feeds install -a -p luci -v
-        ./scripts/feeds install -a -p routing -v
-        ./scripts/feeds install -a -p telephony -v
-        ./scripts/feeds install -a -p wireless -v
-        ./scripts/feeds install -a -p qca -v
+        ./scripts/feeds install -a -p packages 
+        ./scripts/feeds install -a -p luci 
+        ./scripts/feeds install -a -p routing 
+        ./scripts/feeds install -a -p telephony 
+        ./scripts/feeds install -a -p wireless 
+        ./scripts/feeds install -a -p qca 
         
         # 强制安装IPQ5332关键驱动
-        ./scripts/feeds install -f -p wireless kmod-ath11k-ct -v
-        ./scripts/feeds install -f -p wireless kmod-ath11k-firmware-qca64 -v
-        ./scripts/feeds install -f -p qca kmod-qca-nss-drv -v
-        ./scripts/feeds install -f -p qca kmod-qca-nss-gmac -v
-        ./scripts/feeds install -f -p qca kmod-qca-ppe -v
-        ./scripts/feeds install -f -p qca kmod-thermal-qcom -v
+        ./scripts/feeds install -f -p wireless kmod-ath11k-ct 
+        ./scripts/feeds install -f -p wireless kmod-ath11k-firmware-qca64 
+        ./scripts/feeds install -f -p qca kmod-qca-nss-drv 
+        ./scripts/feeds install -f -p qca kmod-qca-nss-gmac 
+        ./scripts/feeds install -f -p qca kmod-qca-ppe 
+        ./scripts/feeds install -f -p qca kmod-thermal-qcom 
 
         # 驱动存在性验证
         if ! ls feeds | grep -q "kmod-ath11k-ct"; then
@@ -177,13 +178,13 @@ jobs:
         fi
         
         # 安装第三方软件包
-        ./scripts/feeds install -a -p kenzo -v
-        ./scripts/feeds install -a -p small -v
+        ./scripts/feeds install -a -p kenzo 
+        ./scripts/feeds install -a -p small 
         
         # 检查IPQ5332驱动是否存在
         if ! ./scripts/feeds list | grep -q "kmod-ath11k-ct"; then
           echo "⚠️ 未找到ath11k驱动，强制从wireless源安装..."
-          ./scripts/feeds install -f -p wireless kmod-ath11k-ct -v
+          ./scripts/feeds install -f -p wireless kmod-ath11k-ct 
           
           # 再次检查
           if ! ./scripts/feeds list | grep -q "kmod-ath11k-ct"; then
