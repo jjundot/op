@@ -73,6 +73,9 @@ jobs:
     steps:
     - name: 检查环境
       run: |
+        echo PWD
+        cd /etc
+        echo PWD
         cat $DIY_P1_SH
         cat $DIY_P2_SH
         cat $FEEDS_CONF
