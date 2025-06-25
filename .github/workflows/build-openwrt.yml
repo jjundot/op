@@ -1,4 +1,3 @@
-
 name: Build OpenWrt for JD BE6500 (IPQ5332)
 
 on:
@@ -430,4 +429,3 @@ jobs:
         prerelease: false
       env:
         GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}
-Update build-openwrt.yml · gsy-tt/op@719c630
