@@ -67,7 +67,10 @@ jobs:
         git config --global credential.helper store
         echo "https://${GITHUB_TOKEN}:@github.com" > ~/.git-credentials
         echo "Git凭证已配置"
-
+    - name: 清理工作目录
+      run: |
+        rm -rf openwrt
+        mkdir -p openwrt
     - name: 克隆Lienol仓库（带重试机制）
       run: |
         rm -rf openwrt
@@ -88,12 +91,18 @@ jobs:
         cd openwrt
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
         git log -1
+         # 确保克隆到正确目录
+        if [ ! -d "openwrt/.git" ]; then
+         echo "❌ 克隆目录不正确，退出"
+         exit 1
+         fi
 
     - name: 缓存依赖包（加速编译）
       uses: actions/cache@v3
       with:
         path: ${{ env.CACHE_DIR }}
-        key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/dl/**', 'feeds.conf.default', '.config') }}
+        # key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/dl/**', 'feeds.conf.default', '.config') }}
+        key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('feeds.conf.default', '.config', 'target/linux/ipq5332/**') }}
         restore-keys: |
           ${{ runner.os }}-openwrt-dl-
 
@@ -156,6 +165,16 @@ jobs:
         ./scripts/feeds install -f -p qca kmod-qca-nss-gmac -v
         ./scripts/feeds install -f -p qca kmod-qca-ppe -v
         ./scripts/feeds install -f -p qca kmod-thermal-qcom -v
+
+        # 驱动存在性验证
+        if ! ls feeds | grep -q "kmod-ath11k-ct"; then
+          echo "❌ 关键驱动kmod-ath11k-ct未安装，退出"
+          exit 1
+        fi
+        if ! ls feeds | grep -q "kmod-qca-nss-drv"; then
+          echo "❌ 关键驱动kmod-qca-nss-drv未安装，退出"
+          exit 1
+        fi
         
         # 安装第三方软件包
         ./scripts/feeds install -a -p kenzo -v
