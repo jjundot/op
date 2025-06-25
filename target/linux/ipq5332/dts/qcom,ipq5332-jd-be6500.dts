@@ -40,7 +40,7 @@
     };
 
     /* 以太网控制器 - 修正2.5G网口配置 */
-    ethernet@1a10000 {
+    ethernet@a4000000 {
         compatible = "qcom,ipq8074-gmac", "qcom,ipq8064-gmac";
         reg = <0x1a10000 0x10000>;
         interrupts = <0 42 4>;
@@ -57,7 +57,7 @@
     };
 
     /* MDIO总线和PHY */
-    mdio@1a14000 {
+    mdio@a4002000 {
         compatible = "qcom,ipq8074-mdio";
         reg = <0x1a14000 0x1000>;
         #address-cells = <1>;
@@ -111,7 +111,7 @@
         channel-range-end = <1400>;
     };
 
-    /* PCIe控制器 - 连接WiFi */
+    /* PCIe控制器 - 连接WiFi 
     pcie@fe800000 {
         compatible = "qcom,ipq8074-pcie";
         reg = <0xfe800000 0x100000>;
@@ -134,7 +134,7 @@
             device_type = "pci";
             status = "okay";
         };
-    };
+    }; */
 
     /* 温度传感器 */
     thermal@1a00000 {
