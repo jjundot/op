@@ -84,5 +84,6 @@ jobs:
     
       - name: 检查环境
         run: |
+          sleep 60s
           ls ${{ github.workspace }}/.cache/openwrt
     
