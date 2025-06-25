@@ -150,7 +150,7 @@ jobs:
       uses: actions/cache@v3
       with:
         # 缓存路径
-        path: ${{ env.CACHE_DIR }}/dl
+        path: ${{ env.CACHE_DIR }}
         # 缓存键（基于配置文件和目标架构）
         key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('feeds.conf.default', '.config', 'target/linux/ipq5332/**') }}
         # 缓存恢复键
