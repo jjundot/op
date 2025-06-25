@@ -6,6 +6,7 @@ src-git packages https://git.openwrt.org/openwrt/packages.git#openwrt-23.05
 src-git routing https://git.openwrt.org/openwrt/routing.git#openwrt-23.05
 src-git telephony https://git.openwrt.org/openwrt/telephony.git#openwrt-23.05
 src-git wireless https://git.openwrt.org/openwrt/wireless.git#openwrt-23.05
+src-git core https://git.openwrt.org/openwrt/core.git#openwrt-23.05
 
 # qca仓库（修正分支指定）
 src-git qca https://git.openwrt.org/project/qca.git#openwrt-23.05
@@ -13,3 +14,5 @@ src-git qca https://git.openwrt.org/project/qca.git#openwrt-23.05
 # kenzok8仓库（建议指定分支，若存在）
 src-git kenzo https://github.com/kenzok8/openwrt-packages#openwrt-23.05
 src-git small https://github.com/kenzok8/small#openwrt-23.05
+# 新增缺失依赖的仓库
+src-git libpam https://git.openwrt.org/openwrt/packages.git#openwrt-23.05
