@@ -45,6 +45,13 @@ jobs:
     runs-on: ubuntu-22.04                                 # 直接使用Ubuntu环境
 
     steps:
+    - name: clone仓库
+      uses: actions/cache@v3
+      with:
+        path: ${{ env.CACHE_DIR }}
+        key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/dl/**', 'feeds.conf.default') }}
+        restore-keys: |
+          ${{ runner.os }}-openwrt-dl-
     - name: 检查环境
       run: |
         df -hT
