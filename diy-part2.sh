@@ -160,3 +160,7 @@ echo "CONFIG_PACKAGE_pdnsd=y" >> .config
 
 # 确保所有依赖包被包含
 make defconfig
+
+# 写入默认MAC地址（从DTS中获取前6字节）
+MAC_PREFIX=$(grep -oP 'qcom,mac-address = \[\K[0-9a-f]{2}(?: [0-9a-f]{2}){5}' target/linux/ipq5332/dts/qcom\*,ipq5332-jd-be6500.dts | tr -d ' ')
+echo "option macaddr '$MAC_PREFIX'" > package/base-files/files/bin/config_generate
