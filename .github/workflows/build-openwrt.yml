@@ -33,6 +33,7 @@ env:
   TZ: Asia/Shanghai                                      # 时区
   GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}                  # GitHub Token
   CACHE_DIR: ${{ github.workspace }}/openwrt             # 缓存目录
+  OPENWRT_DIR: ${{ env.WORKSPACE }}/openwrt              # OpenWrt源码目录
 
 jobs:
   build:
