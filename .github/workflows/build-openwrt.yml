@@ -48,10 +48,7 @@ jobs:
     - name: clone仓库
       uses: actions/checkout@v4
       with:
-        path: ${{ env.CACHE_DIR }}
-        key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/dl/**', 'feeds.conf.default') }}
-        restore-keys: |
-          ${{ runner.os }}-openwrt-dl-
+        path: .
     - name: 检查环境
       run: |
         cat .config
