@@ -107,4 +107,11 @@ chip0 {
 }
 EOF
 
+
+# 追加BE6500专属配置（示例：激活6G频段）
+sed -i 's/CONFIG_ATH11K_6G=n/CONFIG_ATH11K_6G=y/g' .config
+# 配置2.5G网口巨型帧
+sed -i 's/CONFIG_IPQ5332_2_5G_MTU=1500/CONFIG_IPQ5332_2_5G_MTU=9000/g' target/linux/ipq5332/files/config/network
+
+
 echo "IPQ5332编译前优化完成"
