@@ -281,6 +281,11 @@ jobs:
     - name: 下载依赖包（带缓存）
       run: |
         cd $OPENWRT_PATH
+        pwd
+        ls 
+        ls ./target
+        tree ./target
+        
         echo "开始下载依赖包..."
         
         # 优先使用缓存
