@@ -13,6 +13,11 @@ on:
         required: false
         default: 'true'
         type: boolean
+      with_docker:
+        description: '编译包含 Docker 支持'
+        required: false
+        default: 'true'
+        type: boolean
   release:
     types: published  # 发布Release时触发
 
@@ -33,7 +38,7 @@ env:
   TZ: Asia/Shanghai                                      # 时区
   GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}                  # GitHub Token
   CACHE_DIR: ${{ github.workspace }}/openwrt             # 缓存目录
-  OPENWRT_DIR: ${{ env.WORKSPACE }}/openwrt              # OpenWrt源码目录
+  OPENWRT_PATH: ${{ github.workspace }}/openwrt     
 
 jobs:
   build:
@@ -81,6 +86,355 @@ jobs:
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
         echo $GITHUB_ENV
         echo $OPENWRT_PATH
-        echo $PWD
-        ls .
         git log -1
+    - name: 缓存依赖包（加速编译）
+      uses: actions/cache@v3
+      with:
+        path: ${{ env.CACHE_DIR }}
+        key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/dl/**', 'feeds.conf.default') }}
+        restore-keys: |
+          ${{ runner.os }}-openwrt-dl-
+    - name: 创建设备树（IPQ5332适配）
+      run: |
+        cd $OPENWRT_PATH
+        DEVICE_TREE="qcom,ipq5332-jd-be6500.dts"
+        DTS_DIR="target/linux/$ARCH/dts"
+        mkdir -p "$DTS_DIR"
+        
+        # 设备树完整性校验
+        if [ ! -f "$DTS_DIR/$DEVICE_TREE" ]; then
+          echo "生成JD BE6500设备树..."
+          touch "$DTS_DIR/$DEVICE_TREE"
+          
+          # 使用echo生成设备树
+          echo "/dts-v1/;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "#include \"qcom,ipq5332.dtsi\"" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "#include \"ipq807x.dtsi\"" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "/ {" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  model = \"JD BE6500\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  compatible = \"qcom,ipq5332\", \"qcom,ipq5000\", \"qcom,ipq807x\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  chosen {" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    bootargs = \"earlycon=msm_serial_dm,0x1a10000 console=ttyMSM0,115200n8\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  };" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  memory@80000000 {" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    device_type = \"memory\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    reg = <0x80000000 0x40000000>; /* 1GB */" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  };" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  # 网络设备配置（根据BE6500实际硬件调整）" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  ethernet@1a10000 {" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    compatible = \"qcom,ipq8074-gmac\", \"qcom,ipq8064-gmac\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    reg = <0x1a10000 0x10000>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    interrupts = <0 42 4>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,phy-handle = <&switch0_phy0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,mdio-bus = <&mdio>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,port-id = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,rxq-pool = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,txq-pool = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    qcom,ptp-clock = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  };" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  mdio@1a14000 {" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    compatible = \"qcom,ipq8074-mdio\";" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    reg = <0x1a14000 0x1000>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    #address-cells = <1>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "    #size-cells = <0>;" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "  };" >> "$DTS_DIR/$DEVICE_TREE"
+          echo "};" >> "$DTS_DIR/$DEVICE_TREE"
+          
+          echo "设备树已生成: $DTS_DIR/$DEVICE_TREE"
+        else
+          echo "设备树已存在，跳过生成"
+        fi
+    - name: 智能Feeds配置（去重+依赖修复）
+      run: |
+        cd $OPENWRT_PATH
+        # 备份原始Feeds配置
+        cp $FEEDS_CONF ${FEEDS_CONF}.bak
+        
+        # 1. 清理重复源（保留唯一实例）
+        UNIQUE_FEEDS=$(cat $FEEDS_CONF | grep -v '^#' | sort -u)
+        > $FEEDS_CONF
+        echo "$UNIQUE_FEEDS" >> $FEEDS_CONF
+        
+        # 2. 添加必要源（避免重复添加）
+        if ! grep -q "lienol" $FEEDS_CONF; then
+          echo "src-git lienol https://github.com/Lienol/openwrt-package" >> $FEEDS_CONF
+        fi
+        if ! grep -q "kenzo" $FEEDS_CONF; then
+          echo "src-git kenzo https://github.com/kenzok8/openwrt-packages" >> $FEEDS_CONF
+        fi
+        if ! grep -q "small" $FEEDS_CONF; then
+          echo "src-git small https://github.com/kenzok8/small" >> $FEEDS_CONF
+        fi
+        
+        # 3. 添加官方源（补充基础包）
+        echo "src-gz openwrt_core https://downloads.openwrt.org/releases/23.05.0/targets/$ARCH/$SUBARCH/packages" >> $FEEDS_CONF
+        echo "src-gz openwrt_base https://downloads.openwrt.org/releases/23.05.0/packages/$CPU_ARCH/base" >> $FEEDS_CONF
+        echo "src-gz openwrt_luci https://downloads.openwrt.org/releases/23.05.0/packages/$CPU_ARCH/luci" >> $FEEDS_CONF
+        echo "src-gz openwrt_packages https://downloads.openwrt.org/releases/23.05.0/packages/$CPU_ARCH/packages" >> $FEEDS_CONF
+        
+        # 4. 显示最终Feeds配置
+        echo "=== 最终Feeds配置 ==="
+        cat $FEEDS_CONF
+    - name: 依赖强化安装（解决历史报错）
+      run: |
+        cd $OPENWRT_PATH
+        # 清理旧Feeds
+        rm -rf feeds/*
+        
+        # 多轮Feeds更新（解决网络波动）
+        for i in {1..3}; do
+          echo "=== 第 $i 次Feeds更新 ==="
+          ./scripts/feeds update -a 2>&1 | tee feeds_update_${i}.log
+          if [ $? -eq 0 ]; then
+            break
+          fi
+          echo "更新失败，10秒后重试..."
+          sleep 10
+        done
+        
+        # 安装Feeds（带依赖修复）
+        ./scripts/feeds install -a 2>&1 | tee feeds_install.log
+        
+        # 检测并安装缺失的关键依赖
+        MISSING_PACKAGES=()
+        for pkg in luci-app-samba wsdd2 luci-app-samba4 libpam liblzma libnetsnmp; do
+          if ! ./scripts/feeds list | grep -q $pkg; then
+            MISSING_PACKAGES+=($pkg)
+            echo "⚠️ 缺失依赖: $pkg，尝试手动添加"
+            
+            # 自动克隆缺失的包
+            if [ $pkg == "luci-app-samba" ]; then
+              mkdir -p package/custom/luci
+              git clone https://github.com/openwrt/luci.git package/custom/luci
+            elif [ $pkg == "wsdd2" ]; then
+              mkdir -p package/custom/wsdd2
+              git clone https://github.com/small-5/wsdd2.git package/custom/wsdd2
+            elif [ $pkg == "libpam" ]; then
+              mkdir -p package/custom/packages
+              git clone https://github.com/openwrt/packages.git package/custom/packages
+            fi
+          fi
+        done
+        
+        if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+          echo "发现 ${#MISSING_PACKAGES[@]} 个缺失依赖: ${MISSING_PACKAGES[*]}"
+          echo "重新安装Feeds..."
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+        else
+          echo "✅ 所有依赖已安装"
+        fi
+    - name: 基础配置生成（强制目标平台）
+      run: |
+        cd $OPENWRT_PATH
+        # 清空原有配置（避免默认配置干扰）
+        > .config
+        
+        # 生成默认配置
+        make defconfig
+        
+        # 强制设置IPQ807x目标平台（IPQ5332适配）
+        echo "CONFIG_TARGET_ipq807x=y" >> .config
+        echo "CONFIG_TARGET_ipq807x_generic=y" >> .config
+        echo "CONFIG_TARGET_IPQ807X_DEVICE_generic=y" >> .config
+        echo "CONFIG_TARGET_IPQ807X_DEVICE_jd-be6500=y" >> .config  # 关键：指定设备树目标
+        echo "CONFIG_TARGET_KERNEL_PARTSIZE=16" >> .config         # 设置固件分区大小（MB）
+        
+        # 启用必要的基础包
+        echo "CONFIG_PACKAGE_luci=y" >> .config
+        echo "CONFIG_PACKAGE_luci-ssl=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-ath11k-ct=y" >> .config       # Wi-Fi 7驱动
+        echo "CONFIG_PACKAGE_kmod-qca-ppe=y" >> .config        # PPE加速模块
+        echo "CONFIG_PACKAGE_fstools=y" >> .config             # 固件工具
+        echo "CONFIG_PACKAGE_partx=y" >> .config               # 分区工具
+        
+        # 显示当前配置（用于调试）
+        echo "=== 当前.config 目标配置 ==="
+        grep -E "CONFIG_TARGET|CONFIG_DEVICE" .config
+    - name: 动态依赖配置（根据输入参数）
+      run: |
+        cd $OPENWRT_PATH
+        # 根据用户输入启用功能
+        if [ ${{ github.event.inputs.with_wsdd2 == 'true' }} ]; then
+          echo "CONFIG_PACKAGE_wsdd2=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-wsdd2=y" >> .config
+        fi
+        
+        if [ ${{ github.event.inputs.with_samba4 == 'true' }} ]; then
+          echo "CONFIG_PACKAGE_samba4=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-samba4=y" >> .config
+        fi
+        
+        # 修复历史依赖问题
+        echo "CONFIG_PACKAGE_libpam=y" >> .config
+        echo "CONFIG_PACKAGE_liblzma=y" >> .config
+        echo "CONFIG_PACKAGE_libnetsnmp=y" >> .config
+        
+        # 显示关键配置
+        echo "=== 关键配置 ==="
+        grep -E "CONFIG_TARGET|CONFIG_PACKAGE_(samba|wsdd2|libpam)" .config
+    - name: 下载依赖包（带缓存）
+      run: |
+        cd $OPENWRT_PATH
+        echo "开始下载依赖包..."
+        
+        # 优先使用缓存
+        if [ -d "${{ env.CACHE_DIR }}/dl" ]; then
+          echo "使用缓存依赖包..."
+          cp -rf "${{ env.CACHE_DIR }}/dl" .
+        fi
+        
+        # 执行下载
+        make download -j$(nproc) V=s
+        DOWNLOAD_STATUS=$?
+        
+        # 保存缓存
+        mkdir -p "${{ env.CACHE_DIR }}/dl"
+        cp -rf dl/* "${{ env.CACHE_DIR }}/dl/"
+        
+        # 清理无效文件
+        find dl -size -1024c -exec rm -f {} \;
+        
+        if [ $DOWNLOAD_STATUS -ne 0 ]; then
+          echo "⚠️ 下载可能存在错误，继续构建..."
+          find dl -type f -empty -exec echo "空文件: {}" \;
+        else
+          echo "✅ 依赖下载完成"
+          echo "下载文件数: $(find dl -type f | wc -l)"
+        fi
+    - name: 编译固件（带详细错误日志）
+      run: |
+        cd $OPENWRT_PATH
+        echo "开始编译固件... (IPQ5332专用)"
+        echo "使用 $(nproc) 线程编译..."
+        
+        # 第一阶段：并行编译
+        make -j$(nproc) V=s 2>&1 | tee compile_phase1.log
+        PHASE1_STATUS=$?
+        
+        if [ $PHASE1_STATUS -ne 0 ]; then
+          echo "❌ 并行编译失败，尝试单线程编译..."
+          # 第二阶段：单线程编译（获取详细错误）
+          make -j1 V=s 2>&1 | tee compile_phase2.log
+          PHASE2_STATUS=$?
+          
+          if [ $PHASE2_STATUS -ne 0 ]; then
+            echo "💥 编译彻底失败，收集错误日志..."
+            # 提取关键错误信息
+            echo "=== 编译错误摘要 ==="
+            grep -E "error:|fatal:|make\[.*:.*Error\]" compile_phase2.log || true
+            
+            # 保存完整日志
+            mkdir -p error_logs
+            cp compile_phase*.log error_logs/
+            cp $(find . -name "*.err" -or -name "*.log") error_logs/ 2>/dev/null
+            tar -czf error_logs.tar.gz error_logs
+            exit 1
+          else
+            echo "✅ 单线程编译成功"
+          fi
+        else
+          echo "✅ 并行编译成功"
+        fi
+    - name: 固件完整性检查（精准定位目标目录）
+      run: |
+        cd $OPENWRT_PATH
+        # 动态定位ipq807x目标目录
+        IPQ807X_DIR=$(find . -type d -name "ipq807x" 2>/dev/null)
+        if [ -z "$IPQ807X_DIR" ]; then
+          echo "❌ 未找到ipq807x目标目录"
+          echo "可用目标目录:"
+          find . -type d -name "*" | grep targets
+          exit 1
+        fi
+        
+        FIRMWARE_PATH="$IPQ807X_DIR/generic"
+        if [ ! -d "$FIRMWARE_PATH" ]; then
+          echo "❌ 未找到ipq807x/generic 目录"
+          echo "可用目录:"
+          find "$IPQ807X_DIR" -type d
+          exit 1
+        fi
+        
+        echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
+        
+        # 检查关键固件文件
+        REQUIRED_FILES=(
+          "openwrt-$ARCH-$SUBARCH-generic-jd-be6500-squashfs-sysupgrade.bin"
+          "openwrt-$ARCH-$SUBARCH-generic-rootfs.tar.gz"
+          "openwrt-$ARCH-$SUBARCH-generic-ext4-fsck"
+        )
+        
+        MISSING_FILES=()
+        for file in "${REQUIRED_FILES[@]}"; do
+          if [ ! -f "$FIRMWARE_PATH/$file" ]; then
+            MISSING_FILES+=($file)
+          fi
+        done
+        
+        if [ ${#MISSING_FILES[@]} -gt 0 ]; then
+          echo "❌ 发现缺失固件文件: ${MISSING_FILES[*]}"
+          echo "可用文件:"
+          tree .
+          ls -lh $FIRMWARE_PATH/* || true
+          exit 1
+        else
+          echo "✅ 所有关键固件文件已生成"
+          ls -lh $FIRMWARE_PATH/*.bin
+        fi
+    - name: 生成版本信息
+      id: version
+      run: |
+        cd $OPENWRT_PATH
+        RELEASE_DATE=$(date +%Y%m%d)
+        COMMIT_ID=$(git rev-parse --short HEAD)
+        BUILD_TIME=$(date +"%Y-%m-%d %H:%M:%S")
+        BUILD_HOST=$(hostname)
+        
+        # 生成版本信息文件
+        touch version.info
+        echo "OpenWrt 固件 for JD BE6500 (IPQ5332)" >> version.info
+        echo "编译时间: $BUILD_TIME" >> version.info
+        echo "编译主机: $BUILD_HOST" >> version.info
+        echo "Git 提交: $COMMIT_ID" >> version.info
+        echo "Lienol 分支: $LIENOL_BRANCH" >> version.info
+        echo "目标平台: $ARCH/$SUBARCH" >> version.info
+        
+        # 输出版本变量
+        echo "release_version=OpenWrt_${RELEASE_DATE}_${COMMIT_ID}" >> $GITHUB_ENV
+        echo "release_version=OpenWrt_${RELEASE_DATE}_${COMMIT_ID}" >> $GITHUB_OUTPUT
+        cat version.info
+    - name: 上传固件到Artifact
+      if: steps.version.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.release_version }}
+        path: |
+          ${{ env.FIRMWARE_PATH }}/*.bin
+          ${{ env.FIRMWARE_PATH }}/*.tar.gz
+          ${{ env.FIRMWARE_PATH }}/sha256sums
+          version.info
+        retention-days: 30
+        if-no-files-found: error
+
+    - name: 发布到GitHub Release
+      if: steps.version.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && github.event_name == 'release'
+      uses: softprops/action-gh-release@v1
+      with:
+        name: ${{ env.release_version }}
+        tag_name: ${{ env.release_version }}
+        body_path: version.info
+        files: |
+          ${{ env.FIRMWARE_PATH }}/*.bin
+          ${{ env.FIRMWARE_PATH }}/*.tar.gz
+          ${{ env.FIRMWARE_PATH }}/sha256sums
+          version.info
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}
