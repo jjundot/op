@@ -310,6 +310,10 @@ jobs:
     - name: 编译固件（带详细错误日志）
       run: |
         cd $OPENWRT_PATH
+        ls 
+        ls ./target 
+        ls ./target/linux
+        tree ./target
         make distclean
         make defconfig TARGET=ipq5332 TARGET_DEVICE=jd-be6500
         echo "开始编译固件... (IPQ5332专用)"
