@@ -32,7 +32,7 @@ env:
   UPLOAD_CDN: false                                      # 上传到CDN
   TZ: Asia/Shanghai                                      # 时区
   GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}                  # GitHub Token
-  CACHE_DIR: ${{ github.workspace }}/.cache/openwrt       # 缓存目录
+  CACHE_DIR: ${{ github.workspace }}/openwrt             # 缓存目录
 
 jobs:
   build:
@@ -78,6 +78,8 @@ jobs:
         fi
         cd openwrt
         echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
+        echo $GITHUB_ENV
         echo $OPENWRT_PATH
+        echo $PWD
+        ls .
         git log -1
-    
