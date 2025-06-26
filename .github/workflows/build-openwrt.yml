@@ -51,58 +51,7 @@ jobs:
         free -h
         cat /proc/cpuinfo
         cat /etc/os-release
-    - name: 安装OpenWrt编译依赖
-      run: |
-        sudo apt-get update
-        # 安装OpenWrt官方推荐的编译依赖
-        sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
-          gettext git java-propose-classpath libelf-dev libncurses5-dev \
-          libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools \
-          python3-dev rsync subversion swig time unzip wget xmlto zlib1g-dev \
-          quilt autopoint libtool-bin gperf flex bison gettext-base asciidoc dos2unix
-    - name: 配置Git凭证
-      run: |
-        git config --global credential.helper store
-        echo "https://${GITHUB_TOKEN}:@github.com" > ~/.git-credentials
-        echo "Git凭证已配置"
-    - name: 克隆Lienol仓库（带重试机制）
-      run: |
-        rm -rf openwrt
-        for i in {1..5}; do
-          echo "=== 第 $i 次克隆尝试 ==="
-          git clone --depth=1 $LIENOL_REPO -b $LIENOL_BRANCH openwrt
-          if [ $? -eq 0 ]; then
-            echo "✅ 仓库克隆成功"
-            break
-          fi
-          echo "❌ 克隆失败，15秒后重试..."
-          sleep 15
-        done
-        if [ ! -d "openwrt" ]; then
-          echo "💥 五次克隆失败，退出"
-          exit 1
-        fi
-        cd openwrt
-        echo "OPENWRT_PATH=$(pwd)" >> $GITHUB_ENV
-        echo $GITHUB_ENV
-        echo $OPENWRT_PATH
-        git log -1
-    - name: 缓存依赖包（加速编译）
-      uses: actions/cache@v3
-      with:
-        path: ${{ env.CACHE_DIR }}
-        key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/dl/**', 'feeds.conf.default') }}
-        restore-keys: |
-          ${{ runner.os }}-openwrt-dl-
-
-    - name: 下载依赖包（带缓存）
-      run: |
-        cd $OPENWRT_PATH
-        pwd
-        ls -la
-        [ cat .config ] || echo ".config not"
-        cat feeds.conf.default
-        ls ./target
-        tree ./target
-    
-   
+        ls -a 
+        cat .config
+        cat fee*
+        ls -l target
