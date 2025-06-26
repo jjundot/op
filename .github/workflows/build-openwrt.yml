@@ -283,6 +283,7 @@ jobs:
         cd $OPENWRT_PATH
         pwd
         ls 
+        cat feeds.conf.default
         ls ./target
         tree ./target
         
