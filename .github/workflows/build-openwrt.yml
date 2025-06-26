@@ -54,11 +54,6 @@ jobs:
           ${{ runner.os }}-openwrt-dl-
     - name: 检查环境
       run: |
-        df -hT
-        free -h
-        cat /proc/cpuinfo
-        cat /etc/os-release
-        ls -a 
         cat .config
         cat fee*
         ls -l target
