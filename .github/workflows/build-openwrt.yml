@@ -45,12 +45,193 @@ jobs:
     runs-on: ubuntu-22.04                                 # 直接使用Ubuntu环境
 
     steps:
+    - name: 安装OpenWrt编译依赖
+      run: |
+        sudo apt-get update
+        # 安装OpenWrt官方推荐的编译依赖
+        sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
+          gettext git java-propose-classpath libelf-dev libncurses5-dev \
+          libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools \
+          python3-dev rsync subversion swig time unzip wget xmlto zlib1g-dev \
+          quilt autopoint libtool-bin gperf flex bison gettext-base asciidoc dos2unix
+    - name: 配置Git凭证
+      run: |
+        git config --global credential.helper store
+        echo "https://${GITHUB_TOKEN}:@github.com" > ~/.git-credentials
+        echo "Git凭证已配置"
     - name: clone仓库
       uses: actions/checkout@v4
       with:
         path: .
-    - name: 检查环境
+    - name: 依赖强化安装（解决历史报错）
       run: |
-        cat .config
-        cat fee*
-        ls -l target
+        cd $OPENWRT_PATH        
+        # 安装Feeds（带依赖修复）
+        ./scripts/feeds install -a 2>&1 | tee feeds_install.log
+        
+        # 检测并安装缺失的关键依赖
+        MISSING_PACKAGES=()
+        for pkg in luci-app-samba wsdd2 luci-app-samba4 libpam liblzma libnetsnmp; do
+          if ! ./scripts/feeds list | grep -q $pkg; then
+            MISSING_PACKAGES+=($pkg)
+            echo "⚠️ 缺失依赖: $pkg，尝试手动添加"
+            
+            # 自动克隆缺失的包
+            if [ $pkg == "luci-app-samba" ]; then
+              mkdir -p package/custom/luci
+              git clone https://github.com/openwrt/luci.git package/custom/luci
+            elif [ $pkg == "wsdd2" ]; then
+              mkdir -p package/custom/wsdd2
+              git clone https://github.com/small-5/wsdd2.git package/custom/wsdd2
+            elif [ $pkg == "libpam" ]; then
+              mkdir -p package/custom/packages
+              git clone https://github.com/openwrt/packages.git package/custom/packages
+            fi
+          fi
+        done
+        
+        if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
+          echo "发现 ${#MISSING_PACKAGES[@]} 个缺失依赖: ${MISSING_PACKAGES[*]}"
+          echo "重新安装Feeds..."
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+        else
+          echo "✅ 所有依赖已安装"
+        fi
+
+        
+      
+        
+       
+    - name: 编译固件（带详细错误日志）
+      run: |
+        make distclean
+        make defconfig TARGET=ipq5332 TARGET_DEVICE=jd-be6500
+        echo "开始编译固件... (IPQ5332专用)"
+        echo "使用 $(nproc) 线程编译..."
+        
+        # 第一阶段：并行编译
+        make -j$(nproc) V=s 2>&1 | tee compile_phase1.log
+        PHASE1_STATUS=$?
+        
+        if [ $PHASE1_STATUS -ne 0 ]; then
+          echo "❌ 并行编译失败，尝试单线程编译..."
+          # 第二阶段：单线程编译（获取详细错误）
+          make -j1 V=s 2>&1 | tee compile_phase2.log
+          PHASE2_STATUS=$?
+          
+          if [ $PHASE2_STATUS -ne 0 ]; then
+            echo "💥 编译彻底失败，收集错误日志..."
+            # 提取关键错误信息
+            echo "=== 编译错误摘要 ==="
+            grep -E "error:|fatal:|make\[.*:.*Error\]" compile_phase2.log || true
+            
+            # 保存完整日志
+            mkdir -p error_logs
+            cp compile_phase*.log error_logs/
+            cp $(find . -name "*.err" -or -name "*.log") error_logs/ 2>/dev/null
+            tar -czf error_logs.tar.gz error_logs
+            exit 1
+          else
+            echo "✅ 单线程编译成功"
+          fi
+        else
+          echo "✅ 并行编译成功"
+        fi
+    - name: 固件完整性检查（精准定位目标目录）
+      run: |
+        cd $OPENWRT_PATH
+        # 动态定位ipq807x目标目录
+        IPQ807X_DIR=$(find . -type d -name "ipq807x" 2>/dev/null)
+        if [ -z "$IPQ807X_DIR" ]; then
+          echo "❌ 未找到ipq807x目标目录"
+          echo "可用目标目录:"
+          find . -type d -name "*" | grep targets
+          exit 1
+        fi
+        
+        FIRMWARE_PATH="$IPQ807X_DIR/generic"
+        if [ ! -d "$FIRMWARE_PATH" ]; then
+          echo "❌ 未找到ipq807x/generic 目录"
+          echo "可用目录:"
+          find "$IPQ807X_DIR" -type d
+          exit 1
+        fi
+        
+        echo "FIRMWARE_PATH=$FIRMWARE_PATH" >> $GITHUB_ENV
+        
+        # 检查关键固件文件
+        REQUIRED_FILES=(
+          "openwrt-$ARCH-$SUBARCH-generic-jd-be6500-squashfs-sysupgrade.bin"
+          "openwrt-$ARCH-$SUBARCH-generic-rootfs.tar.gz"
+          "openwrt-$ARCH-$SUBARCH-generic-ext4-fsck"
+        )
+        
+        MISSING_FILES=()
+        for file in "${REQUIRED_FILES[@]}"; do
+          if [ ! -f "$FIRMWARE_PATH/$file" ]; then
+            MISSING_FILES+=($file)
+          fi
+        done
+        
+        if [ ${#MISSING_FILES[@]} -gt 0 ]; then
+          echo "❌ 发现缺失固件文件: ${MISSING_FILES[*]}"
+          echo "可用文件:"
+          tree .
+          ls -lh $FIRMWARE_PATH/* || true
+          exit 1
+        else
+          echo "✅ 所有关键固件文件已生成"
+          ls -lh $FIRMWARE_PATH/*.bin
+        fi
+    - name: 生成版本信息
+      id: version
+      run: |
+        cd $OPENWRT_PATH
+        RELEASE_DATE=$(date +%Y%m%d)
+        COMMIT_ID=$(git rev-parse --short HEAD)
+        BUILD_TIME=$(date +"%Y-%m-%d %H:%M:%S")
+        BUILD_HOST=$(hostname)
+        
+        # 生成版本信息文件
+        touch version.info
+        echo "OpenWrt 固件 for JD BE6500 (IPQ5332)" >> version.info
+        echo "编译时间: $BUILD_TIME" >> version.info
+        echo "编译主机: $BUILD_HOST" >> version.info
+        echo "Git 提交: $COMMIT_ID" >> version.info
+        echo "Lienol 分支: $LIENOL_BRANCH" >> version.info
+        echo "目标平台: $ARCH/$SUBARCH" >> version.info
+        
+        # 输出版本变量
+        echo "release_version=OpenWrt_${RELEASE_DATE}_${COMMIT_ID}" >> $GITHUB_ENV
+        echo "release_version=OpenWrt_${RELEASE_DATE}_${COMMIT_ID}" >> $GITHUB_OUTPUT
+        cat version.info
+    - name: 上传固件到Artifact
+      if: steps.version.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.release_version }}
+        path: |
+          ${{ env.FIRMWARE_PATH }}/*.bin
+          ${{ env.FIRMWARE_PATH }}/*.tar.gz
+          ${{ env.FIRMWARE_PATH }}/sha256sums
+          version.info
+        retention-days: 30
+        if-no-files-found: error
+
+    - name: 发布到GitHub Release
+      if: steps.version.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && github.event_name == 'release'
+      uses: softprops/action-gh-release@v1
+      with:
+        name: ${{ env.release_version }}
+        tag_name: ${{ env.release_version }}
+        body_path: version.info
+        files: |
+          ${{ env.FIRMWARE_PATH }}/*.bin
+          ${{ env.FIRMWARE_PATH }}/*.tar.gz
+          ${{ env.FIRMWARE_PATH }}/sha256sums
+          version.info
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.MY_TOKEN }}
