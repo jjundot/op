@@ -372,6 +372,7 @@ jobs:
         if [ ${#MISSING_FILES[@]} -gt 0 ]; then
           echo "❌ 发现缺失固件文件: ${MISSING_FILES[*]}"
           echo "可用文件:"
+          tree .
           ls -lh $FIRMWARE_PATH/* || true
           exit 1
         else
