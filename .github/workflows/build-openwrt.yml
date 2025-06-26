@@ -46,7 +46,7 @@ jobs:
 
     steps:
     - name: clone仓库
-      uses: actions/cache@v3
+      uses: actions/checkout@v4
       with:
         path: ${{ env.CACHE_DIR }}
         key: ${{ runner.os }}-openwrt-dl-${{ hashFiles('openwrt/dl/**', 'feeds.conf.default') }}
