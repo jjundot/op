@@ -59,10 +59,13 @@ jobs:
         git config --global credential.helper store
         echo "https://${GITHUB_TOKEN}:@github.com" > ~/.git-credentials
         echo "Git凭证已配置"
+    - name: 创建目录
+      run: |
+        mkdir -p $OPENWRT_PATH
     - name: clone仓库
       uses: actions/checkout@v4
       with:
-        path: .
+        path: $OPENWRT_PATH
     - name: 依赖强化安装（解决历史报错）
       run: |
         mkdir -p $OPENWRT_PATH && cd $OPENWRT_PATH
