@@ -76,7 +76,7 @@ jobs:
         
         # 检测并安装缺失的关键依赖
         MISSING_PACKAGES=()
-        for pkg in luci-app-samba luci-app-samba4 libpam liblzma libnetsnmp; do
+        for pkg in libpam liblzma libnetsnmp; do
           if ! ./scripts/feeds list | grep -q $pkg; then
             MISSING_PACKAGES+=($pkg)
             echo "⚠️ 缺失依赖: $pkg，尝试手动添加"
