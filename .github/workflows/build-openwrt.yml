@@ -6,17 +6,17 @@ on:
       with_wsdd2:
         description: '编译包含 WSDD2 (SMB3 支持)'
         required: false
-        default: 'true'
+        default: 'false'
         type: boolean
       with_samba4:
         description: '编译包含 Samba4'
         required: false
-        default: 'true'
+        default: 'false'
         type: boolean
       with_docker:
         description: '编译包含 Docker 支持'
         required: false
-        default: 'true'
+        default: 'false'
         type: boolean
   release:
     types: published  # 发布Release时触发
