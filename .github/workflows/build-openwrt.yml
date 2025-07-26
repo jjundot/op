@@ -71,43 +71,9 @@ jobs:
         mkdir -p $OPENWRT_PATH && cd $OPENWRT_PATH
         rm .git -rf
         git clone https://github.com/openwrt/openwrt.git .
-        # 安装Feeds（带依赖修复）
-        ./scripts/feeds install -a 2>&1 | tee feeds_install.log
-        
-        # 检测并安装缺失的关键依赖
-        MISSING_PACKAGES=()
-        for pkg in libpam liblzma libnetsnmp; do
-          if ! ./scripts/feeds list | grep -q $pkg; then
-            MISSING_PACKAGES+=($pkg)
-            echo "⚠️ 缺失依赖: $pkg，尝试手动添加"
-            
-            # 自动克隆缺失的包
-            if [ $pkg == "luci-app-samba" ]; then
-              mkdir -p package/custom/luci
-              git clone https://github.com/openwrt/luci.git package/custom/luci
-            elif [ $pkg == "wsdd2" ]; then
-              mkdir -p package/custom/wsdd2
-              git clone https://github.com/small-5/wsdd2.git package/custom/wsdd2
-            elif [ $pkg == "libpam" ]; then
-              mkdir -p package/custom/packages
-              git clone https://github.com/openwrt/packages.git package/custom/packages
-            fi
-          fi
-        done
-        
-        if [ ${#MISSING_PACKAGES[@]} -gt 0 ]; then
-          echo "发现 ${#MISSING_PACKAGES[@]} 个缺失依赖: ${MISSING_PACKAGES[*]}"
-          echo "重新安装Feeds..."
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-        else
-          echo "✅ 所有依赖已安装"
-        fi
-
-        
-      
-        
-       
+        # 安装Feeds
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
     - name: 编译固件（带详细错误日志）
       run: |
         make distclean
