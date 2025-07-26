@@ -65,7 +65,7 @@ jobs:
         path: .
     - name: 依赖强化安装（解决历史报错）
       run: |
-        cd $OPENWRT_PATH        
+        mkdir-p $OPENWRT_PATH && cd $OPENWRT_PATH        
         # 安装Feeds（带依赖修复）
         ./scripts/feeds install -a 2>&1 | tee feeds_install.log
         
